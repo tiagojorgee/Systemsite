@@ -24,7 +24,11 @@ import {
   CheckCircle, 
   AlertCircle,
   HelpCircle,
-  Sparkles
+  Sparkles,
+  Heart,
+  Coins,
+  PictureInPicture,
+  Flame
 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 import { getCleanUserId, addMovie, getMovies } from '../utils/firebaseDb';
@@ -45,6 +49,241 @@ interface MediaItem {
   videoUrl?: string; // Fictitious play link
   tags: string[];
 }
+
+interface LiveChannel {
+  id: string;
+  title: string;
+  desc: string;
+  url: string;
+  type: 'youtube' | 'iptv';
+  category: 'Notícias' | 'Esportes' | 'Desenhos' | 'Cultura' | 'Legislativo' | 'Variedades';
+  imageUrl: string;
+  views: string;
+  logoColor?: string;
+}
+
+const PRECONFIGURED_BR_CHANNELS: LiveChannel[] = [
+  {
+    id: "br-1",
+    title: "CNN Brasil Ao Vivo",
+    desc: "Acompanhe as principais notícias do Brasil e do mundo, análises de especialistas em política e economia, coberturas exclusivas e debates em tempo real 24 horas por dia.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCcoTC356Y07z_mXWv4X-uJI",
+    type: "youtube",
+    category: "Notícias",
+    imageUrl: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?q=80&w=1200",
+    views: "142K assistindo",
+    logoColor: "bg-red-600"
+  },
+  {
+    id: "br-2",
+    title: "Jovem Pan News Ao Vivo",
+    desc: "A transmissão em tempo real da Jovem Pan News, conhecida por seus debates políticos vibrantes, notícias nacionais, opinião e cobertura jornalística diária completa.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCEvSpR6v_VOf3T5mDWVHnzg",
+    type: "youtube",
+    category: "Notícias",
+    imageUrl: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200",
+    views: "95K assistindo",
+    logoColor: "bg-blue-600"
+  },
+  {
+    id: "br-3",
+    title: "CazéTV Ao Vivo",
+    desc: "O maior fenômeno de transmissões esportivas do YouTube brasileiro. Curta futebol nacional e internacional, resenhas esportivas e entretenimento liderado por Casimiro Miguel.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UC_g69pZ0Y2eC3O4uVbOsnqH7w",
+    type: "youtube",
+    category: "Esportes",
+    imageUrl: "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=1200",
+    views: "350K assistindo",
+    logoColor: "bg-yellow-500"
+  },
+  {
+    id: "br-4",
+    title: "SBT News Ao Vivo",
+    desc: "Todas as notícias de hoje com a rapidez e a seriedade do jornalismo do SBT. Fique por dentro de tudo sobre política, economia, trânsito e o cenário policial do país.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UC_gWv3fT8u5q7UvR6X7U7vg",
+    type: "youtube",
+    category: "Notícias",
+    imageUrl: "https://images.unsplash.com/photo-1526470608268-f674ce90ebd4?q=80&w=1200",
+    views: "38K assistindo",
+    logoColor: "bg-indigo-600"
+  },
+  {
+    id: "br-5",
+    title: "Turma da Mônica Ao Vivo",
+    desc: "Transmissão 24h contínua com os desenhos e animações oficiais mais queridos do Brasil. Diversão segura e garantida com Mônica, Cebolinha, Cascão, Magali e toda a turma.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCF-uAOnLAt0hZ9N6_g",
+    type: "youtube",
+    category: "Desenhos",
+    imageUrl: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1200",
+    views: "22K assistindo",
+    logoColor: "bg-red-500"
+  },
+  {
+    id: "br-6",
+    title: "TV Cultura Ao Vivo",
+    desc: "Referência em educação, arte e cultura na televisão brasileira. Oferece jornalismo independente de alto nível, debates esclarecedores e desenhos clássicos lendários.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UC_co_P8qW_k_0tH8vK-O5bA",
+    type: "youtube",
+    category: "Cultura",
+    imageUrl: "https://images.unsplash.com/photo-1594909122845-11baa439b7bf?q=80&w=1200",
+    views: "18K assistindo",
+    logoColor: "bg-green-600"
+  },
+  {
+    id: "br-7",
+    title: "TV Brasil Ao Vivo",
+    desc: "Sinal público oficial da TV Brasil (EBC). Transmissão repleta de conteúdo diversificado, com telejornais locais, documentários ecológicos brasileiros e produções culturais nacionais.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UC8UshN-X2M3Yl0_D_9_N6_g",
+    type: "youtube",
+    category: "Cultura",
+    imageUrl: "https://images.unsplash.com/photo-1598257006458-087169a1f08d?q=80&w=1200",
+    views: "15K assistindo",
+    logoColor: "bg-teal-600"
+  },
+  {
+    id: "br-8",
+    title: "Galinha Pintadinha Ao Vivo",
+    desc: "Espaço oficial de transmissão ininterrupta de clipes musicais animados e cantigas infantis educativas do maior personagem infantil da América Latina, ideal para bebês e crianças.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCGJXnDCt6rMD9K4BOK5EXod",
+    type: "youtube",
+    category: "Desenhos",
+    imageUrl: "https://images.unsplash.com/photo-1596461404969-9ae70f2830c1?q=80&w=1200",
+    views: "28K assistindo",
+    logoColor: "bg-sky-500"
+  },
+  {
+    id: "br-9",
+    title: "TV Senado Ao Vivo",
+    desc: "Acompanhe de perto as decisões políticas do país. Transmissões das comissões, votações e debates legislativos ao vivo, direto do Congresso Nacional em Brasília.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCFmZ_Wp-6M0D8S7W8Z8w",
+    type: "youtube",
+    category: "Legislativo",
+    imageUrl: "https://images.unsplash.com/photo-1540910419892-4a36d2c3266c?q=80&w=1200",
+    views: "8K assistindo",
+    logoColor: "bg-amber-600"
+  },
+  {
+    id: "br-10",
+    title: "Record News Ao Vivo",
+    desc: "A primeira e única emissora brasileira aberta de TV totalmente dedicada a notícias. Fique sintonizado 24h nas principais coberturas jornalísticas nacionais e internacionais.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCEvSpR6v_VOf3T5mDWVHnzg",
+    type: "youtube",
+    category: "Notícias",
+    imageUrl: "https://images.unsplash.com/photo-1518384401463-d387de163f22?q=80&w=1200",
+    views: "52K assistindo",
+    logoColor: "bg-blue-800"
+  },
+  {
+    id: "br-11",
+    title: "Band Jornalismo Ao Vivo",
+    desc: "Todo o prestígio e o dinamismo do jornalismo da Band em formato digital. Assista à cobertura dos jornais diários em tempo real com análises críticas de primeira linha.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCEvSpR6v_VOf3T5mDWVHnzg",
+    type: "youtube",
+    category: "Notícias",
+    imageUrl: "https://images.unsplash.com/photo-1526470608268-f674ce90ebd4?q=80&w=1200",
+    views: "75K assistindo",
+    logoColor: "bg-emerald-700"
+  },
+  {
+    id: "br-12",
+    title: "BandSports Ao Vivo",
+    desc: "A paixão pelos esportes em alto nível. Acompanhe boletins esportivos, notícias do mercado da bola, automobilismo, tênis e coberturas diárias completas das Olimpíadas.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UC_g69pZ0Y2eC3O4uVbOsnqH7w",
+    type: "youtube",
+    category: "Esportes",
+    imageUrl: "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=1200",
+    views: "24K assistindo",
+    logoColor: "bg-green-700"
+  },
+  {
+    id: "br-13",
+    title: "Climatempo Ao Vivo",
+    desc: "Previsões meteorológicas precisas para todos os estados brasileiros. Fique informado sobre alertas climáticos urgentes, frentes frias, ondas de calor e mudanças bruscas de tempo.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCcoTC356Y07z_mXWv4X-uJI",
+    type: "youtube",
+    category: "Variedades",
+    imageUrl: "https://images.unsplash.com/photo-1504253163759-c23fcca5e559?q=80&w=1200",
+    views: "14K assistindo",
+    logoColor: "bg-cyan-600"
+  },
+  {
+    id: "br-14",
+    title: "Rádio Bandeirantes Ao Vivo",
+    desc: "Sintonize uma das maiores e mais históricas rádios jornalísticas do Brasil. Notícias a cada minuto, análise política, prestação de serviço de trânsito em tempo real e debate de ideias.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCEvSpR6v_VOf3T5mDWVHnzg",
+    type: "youtube",
+    category: "Notícias",
+    imageUrl: "https://images.unsplash.com/photo-1550928431-ec0eed70c2f5?q=80&w=1200",
+    views: "19K assistindo",
+    logoColor: "bg-orange-600"
+  },
+  {
+    id: "br-15",
+    title: "Canal Futura Ao Vivo",
+    desc: "A melhor programação educativa para salas de aula e para toda a família. Conteúdo cultural e social de alto nível produzido pela Fundação Roberto Marinho.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UC_co_P8qW_k_0tH8vK-O5bA",
+    type: "youtube",
+    category: "Cultura",
+    imageUrl: "https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?q=80&w=1200",
+    views: "10K assistindo",
+    logoColor: "bg-purple-600"
+  },
+  {
+    id: "br-16",
+    title: "Canal Rural Ao Vivo",
+    desc: "O canal líder do agronegócio nacional. Acompanhe cotações de soja e milho em tempo real, análises de mercado, leilões rurais e telejornais focados no produtor.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UC8UshN-X2M3Yl0_D_9_N6_g",
+    type: "youtube",
+    category: "Variedades",
+    imageUrl: "https://images.unsplash.com/photo-1500382017468-9049fed747ef?q=80&w=1200",
+    views: "16K assistindo",
+    logoColor: "bg-amber-700"
+  },
+  {
+    id: "br-17",
+    title: "TV Canção Nova Ao Vivo",
+    desc: "Evangelização e espiritualidade católica 24 horas por dia. Missas diárias ao vivo, acampamentos de adoração, pregações marcantes e músicas de cura e louvor.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCGJXnDCt6rMD9K4BOK5EXod",
+    type: "youtube",
+    category: "Variedades",
+    imageUrl: "https://images.unsplash.com/photo-1447242421837-a2e1af7fd3cd?q=80&w=1200",
+    views: "34K assistindo",
+    logoColor: "bg-pink-600"
+  },
+  {
+    id: "br-18",
+    title: "Lofi Girl Brasil Ao Vivo",
+    desc: "O refúgio definitivo para relaxar, programar ou estudar. Batidas suaves de lofi hip-hop ambientadas com clássicos da bossa nova e MPB brasileira em sintonia aconchegante.",
+    url: "https://www.youtube.com/embed/jfKfPfyJRdk",
+    type: "youtube",
+    category: "Variedades",
+    imageUrl: "https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=1200",
+    views: "58K assistindo",
+    logoColor: "bg-rose-500"
+  },
+  {
+    id: "br-19",
+    title: "TV Câmara Ao Vivo",
+    desc: "Acompanhe as sessões plenárias oficiais da Câmara dos Deputados em Brasília, a tramitação de projetos de lei federais e debates urgentes de comissões temáticas.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCcoTC356Y07z_mXWv4X-uJI",
+    type: "youtube",
+    category: "Legislativo",
+    imageUrl: "https://images.unsplash.com/photo-1541872703-74c5e44368f9?q=80&w=1200",
+    views: "12K assistindo",
+    logoColor: "bg-gray-700"
+  },
+  {
+    id: "br-20",
+    title: "TV Novo Tempo Ao Vivo",
+    desc: "Uma programação com foco na saúde integral, culinária naturalista, programas educativos para crianças, estudos bíblicos reconfortantes e mensagens de paz para o seu lar.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCF-uAOnLAt0hZ9N6_g",
+    type: "youtube",
+    category: "Variedades",
+    imageUrl: "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?q=80&w=1200",
+    views: "11K assistindo",
+    logoColor: "bg-sky-600"
+  }
+];
 
 export const Cinema: React.FC<{
   stats: any;
@@ -153,6 +392,28 @@ export const Cinema: React.FC<{
 
   // UI state variables
   const [showConfig, setShowConfig] = useState<boolean>(false);
+
+  // Cinema e TV States (Dual Player Streaming System)
+  const [cinemaSubTab, setCinemaSubTab] = useState<'tv' | 'catalog'>('tv');
+  const [currentMediaType, setCurrentMediaType] = useState<'iptv' | 'youtube' | 'idle'>('youtube');
+  const [currentMediaUrl, setCurrentMediaUrl] = useState<string>('https://www.youtube.com/embed/live_stream?channel=UCcoTC356Y07z_mXWv4X-uJI');
+  const [currentMediaTitle, setCurrentMediaTitle] = useState<string>('CNN Brasil Ao Vivo');
+  const [currentMediaDesc, setCurrentMediaDesc] = useState<string>('Acompanhe as principais notícias do Brasil e do mundo, análises de especialistas em política e economia, coberturas exclusivas e debates em tempo real 24 horas por dia.');
+  const [tvBannerIndex, setTvBannerIndex] = useState<number>(0);
+  const [tvChannelFilter, setTvChannelFilter] = useState<string>('Todos');
+  const [videojsReady, setVideojsReady] = useState<boolean>(false);
+  const [customChannels, setCustomChannels] = useState<any[]>(() => {
+    const cached = localStorage.getItem('gamezone_custom_channels');
+    return cached ? JSON.parse(cached) : [];
+  });
+  const [customChannelName, setCustomChannelName] = useState<string>('');
+  const [customChannelUrl, setCustomChannelUrl] = useState<string>('');
+  const [customChannelType, setCustomChannelType] = useState<'iptv' | 'youtube'>('iptv');
+  const [showAddChannelModal, setShowAddChannelModal] = useState<boolean>(false);
+
+  // References for Video.js player
+  const videojsElementRef = useRef<HTMLVideoElement | null>(null);
+  const videojsPlayerRef = useRef<any>(null);
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -426,6 +687,146 @@ export const Cinema: React.FC<{
   useEffect(() => {
     setCarouselIndex(0);
   }, [userUploadedMovies.length]);
+
+  // Auto-play timer for TV live channels highlights banner
+  useEffect(() => {
+    if (cinemaSubTab !== 'tv') return;
+    const interval = setInterval(() => {
+      setTvBannerIndex(prev => (prev + 1) % 6);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [cinemaSubTab]);
+
+  // Dynamic CDN Loader for Video.js (HLS/IPTV Stream Decoder)
+  useEffect(() => {
+    // 1. Append CSS Link
+    let cssLink = document.getElementById('videojs-cdn-css') as HTMLLinkElement;
+    if (!cssLink) {
+      cssLink = document.createElement('link');
+      cssLink.id = 'videojs-cdn-css';
+      cssLink.rel = 'stylesheet';
+      cssLink.href = 'https://vjs.zencdn.net/8.10.0/video-js.css';
+      document.head.appendChild(cssLink);
+    }
+
+    // 2. Append Javascript Script
+    let jsScript = document.getElementById('videojs-cdn-js') as HTMLScriptElement;
+    if (!jsScript) {
+      jsScript = document.createElement('script');
+      jsScript.id = 'videojs-cdn-js';
+      jsScript.src = 'https://vjs.zencdn.net/8.10.0/video.min.js';
+      jsScript.async = true;
+      jsScript.onload = () => {
+        setVideojsReady(true);
+      };
+      document.head.appendChild(jsScript);
+    } else {
+      setVideojsReady(true);
+    }
+
+    // Cleanup when component unmounts
+    return () => {
+      if (videojsPlayerRef.current) {
+        try {
+          videojsPlayerRef.current.dispose();
+          videojsPlayerRef.current = null;
+        } catch (e) {
+          console.error('Error disposing Video.js on cleanup:', e);
+        }
+      }
+    };
+  }, []);
+
+  // Expert MudarMídia Function: Alternates Player visibility & handles playback
+  const mudarMidia = (tipo: 'iptv' | 'youtube', url: string, title: string, description: string) => {
+    playSound.click();
+    setCurrentMediaType(tipo);
+    setCurrentMediaUrl(url);
+    setCurrentMediaTitle(title);
+    setCurrentMediaDesc(description);
+
+    if (tipo === 'youtube') {
+      // 1. Pause IPTV Video.js Player immediately
+      if (videojsPlayerRef.current) {
+        try {
+          videojsPlayerRef.current.pause();
+        } catch (e) {
+          console.error('Error pausing Video.js on Youtube switch:', e);
+        }
+      }
+    } else if (tipo === 'iptv') {
+      // 2. Load .m3u8/HLS using Video.js with standard configuration and auto-play
+      setTimeout(() => {
+        if ((window as any).videojs) {
+          try {
+            if (!videojsPlayerRef.current) {
+              videojsPlayerRef.current = (window as any).videojs('videojs-live-player', {
+                controls: true,
+                autoplay: true,
+                preload: 'auto',
+                responsive: true,
+                fluid: true,
+                html5: {
+                  vhs: {
+                    overrideNative: true
+                  }
+                }
+              }, () => {
+                videojsPlayerRef.current.src({ src: url, type: 'application/x-mpegURL' });
+                videojsPlayerRef.current.play().catch((err: any) => {
+                  console.log('Video.js autoplay was blocked or delayed:', err);
+                });
+              });
+            } else {
+              videojsPlayerRef.current.src({ src: url, type: 'application/x-mpegURL' });
+              videojsPlayerRef.current.load();
+              videojsPlayerRef.current.play().catch((err: any) => {
+                console.log('Video.js play was blocked or delayed:', err);
+              });
+            }
+          } catch (e) {
+            console.error('Failed to load IPTV stream with Video.js:', e);
+          }
+        }
+      }, 100);
+    }
+  };
+
+  // Toggle picture-in-picture mode for the native HTML5 video player used by Video.js
+  const togglePictureInPicture = async () => {
+    playSound.click();
+
+    if (currentMediaType !== 'iptv') {
+      showToast('⚠️ O modo Picture-in-Picture nativo está disponível apenas para canais de TV ao vivo (IPTV).');
+      return;
+    }
+
+    try {
+      // Find the native video element of Video.js
+      const videoElement = document.getElementById('videojs-live-player_html5_api') as HTMLVideoElement || 
+                           document.getElementById('videojs-live-player') as HTMLVideoElement;
+
+      if (!videoElement) {
+        showToast('⚠️ Player de vídeo não encontrado ou ainda não carregado.');
+        return;
+      }
+
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        showToast('📺 Modo flutuante (PiP) desativado.');
+      } else {
+        if (document.pictureInPictureEnabled || (videoElement as any).webkitSupportsPresentationMode) {
+          await videoElement.requestPictureInPicture();
+          showToast('📺 Modo flutuante (PiP) ativado com sucesso!');
+        } else {
+          showToast('❌ Seu navegador não oferece suporte para Picture-in-Picture.');
+        }
+      }
+    } catch (error: any) {
+      console.error('Erro ao alternar Picture-in-Picture:', error);
+      showToast('❌ Falha ao iniciar Picture-in-Picture. Certifique-se de que o vídeo começou a tocar.');
+    }
+  };
 
   // Pre-carregamento dinâmico de imagens do carrossel para transições instantâneas e navegação ultra leve
   useEffect(() => {
@@ -812,8 +1213,446 @@ export const Cinema: React.FC<{
       {/* MAIN CINEMA FRONT-END (Visible when not searching) */}
       {!searchQuery && (
         <>
-          {/* FEATURED ANIMATED HERO CAROUSEL (HIGH-CONVERTING) */}
-          {carouselItems.length > 0 && (
+          {/* PREMIUM CINEMA & TV SUB-NAV TABS */}
+          <div className="max-w-7xl mx-auto px-4 md:px-8 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 z-30 relative border-b border-zinc-800/60 pb-4">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  playSound.click();
+                  setCinemaSubTab('tv');
+                }}
+                className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
+                  cinemaSubTab === 'tv'
+                    ? 'bg-[#E50914] text-white shadow-lg shadow-red-600/20 scale-105 border border-red-500'
+                    : 'bg-zinc-900/60 text-zinc-400 hover:text-white border border-zinc-800'
+                }`}
+              >
+                <Tv className="w-4 h-4" />
+                <span>📺 Cinema &amp; TV Ao Vivo</span>
+              </button>
+              <button
+                onClick={() => {
+                  playSound.click();
+                  setCinemaSubTab('catalog');
+                }}
+                className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
+                  cinemaSubTab === 'catalog'
+                    ? 'bg-[#E50914] text-white shadow-lg shadow-red-600/20 scale-105 border border-red-500'
+                    : 'bg-zinc-900/60 text-zinc-400 hover:text-white border border-zinc-800'
+                }`}
+              >
+                <Film className="w-4 h-4" />
+                <span>🍿 Catálogo &amp; Filmes da Comunidade</span>
+              </button>
+            </div>
+            <div className="text-[11px] font-mono text-zinc-500 hidden md:block">
+              Sintonizando via <span className="text-[#E50914] font-bold">Video.js HLS &amp; YouTube CDN</span>
+            </div>
+          </div>
+
+          {/* CINEMA & TV PLAYERS TAB */}
+          {cinemaSubTab === 'tv' && (
+            <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 animate-fadeIn" id="tv-ao-vivo-section">
+              
+              {/* LIVE CHANNELS HIGH-CONVERTING HERO BANNER CAROUSEL */}
+              <div className="relative w-full rounded-3xl overflow-hidden mb-8 border border-zinc-800/80 bg-zinc-950 min-h-[260px] md:min-h-[320px] flex flex-col justify-end group shadow-2xl">
+                {/* Background image of the active channel with black gradient overlay */}
+                <div className="absolute inset-0 z-0">
+                  <img
+                    src={PRECONFIGURED_BR_CHANNELS[tvBannerIndex].imageUrl}
+                    alt={PRECONFIGURED_BR_CHANNELS[tvBannerIndex].title}
+                    className="w-full h-full object-cover opacity-35 scale-100 group-hover:scale-105 transition-transform duration-1000 ease-out"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-transparent z-10" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-zinc-950 via-transparent to-transparent z-10 hidden md:block" />
+                </div>
+
+                {/* Banner Content */}
+                <div className="relative z-20 p-6 md:p-10 space-y-4 max-w-3xl">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <span className="px-2.5 py-1 bg-red-600 text-white font-mono font-black text-[9px] uppercase tracking-widest rounded-full flex items-center gap-1.5 shadow-lg shadow-red-900/40 animate-pulse">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white block" />
+                      <span>AO VIVO</span>
+                    </span>
+                    <span className="px-2 py-0.5 bg-zinc-800/80 border border-zinc-700/50 rounded-md text-[9px] font-bold text-zinc-300 uppercase tracking-wider">
+                      {PRECONFIGURED_BR_CHANNELS[tvBannerIndex].category}
+                    </span>
+                    <span className="text-[10px] text-amber-400 font-mono font-bold flex items-center gap-1">
+                      <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />
+                      <span>{PRECONFIGURED_BR_CHANNELS[tvBannerIndex].views}</span>
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <h2 className="text-xl md:text-3.5xl font-black text-white tracking-tight uppercase font-sans drop-shadow-md">
+                      {PRECONFIGURED_BR_CHANNELS[tvBannerIndex].title}
+                    </h2>
+                    <p className="text-xs md:text-sm text-zinc-300 font-medium leading-relaxed drop-shadow-sm line-clamp-2 md:line-clamp-3">
+                      {PRECONFIGURED_BR_CHANNELS[tvBannerIndex].desc}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                    <button
+                      onClick={() => {
+                        playSound.click();
+                        const selectedChan = PRECONFIGURED_BR_CHANNELS[tvBannerIndex];
+                        mudarMidia(selectedChan.type, selectedChan.url, selectedChan.title, selectedChan.desc);
+                        setTimeout(() => {
+                          const el = document.getElementById('player-view-anchor');
+                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 100);
+                      }}
+                      className="px-6 py-3 bg-[#E50914] hover:bg-red-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all hover:scale-[1.03] active:scale-95 shadow-xl shadow-red-900/30 flex items-center gap-2 cursor-pointer"
+                    >
+                      <Play className="w-4 h-4 fill-white text-white" />
+                      <span>Sintonizar no Player</span>
+                    </button>
+                    
+                    <span className="text-[10px] text-zinc-500 font-mono hidden sm:inline">
+                      CDN: Ativa &amp; 100% Estável
+                    </span>
+                  </div>
+                </div>
+
+                {/* Arrow Controls */}
+                <button
+                  onClick={() => {
+                    playSound.click();
+                    setTvBannerIndex(prev => (prev - 1 + 6) % 6);
+                  }}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 rounded-full bg-black/40 border border-zinc-800 hover:border-zinc-700 hover:bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer duration-300"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => {
+                    playSound.click();
+                    setTvBannerIndex(prev => (prev + 1) % 6);
+                  }}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 rounded-full bg-black/40 border border-zinc-800 hover:border-zinc-700 hover:bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer duration-300"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+
+                {/* Banner Indicators (dots) */}
+                <div className="absolute bottom-4 right-6 z-30 flex items-center gap-2">
+                  {[...Array(6)].map((_, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        playSound.click();
+                        setTvBannerIndex(idx);
+                      }}
+                      className={`w-2.5 h-2.5 rounded-full transition-all cursor-pointer ${
+                        tvBannerIndex === idx
+                          ? 'bg-[#E50914] w-6'
+                          : 'bg-zinc-600 hover:bg-zinc-400'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* SCROLL TARGET FOR DYNAMIC NAVIGATION */}
+              <div id="player-view-anchor" className="scroll-mt-24" />
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                
+                {/* PLAYER CENTRAL (COL-SPAN-8) */}
+                <div className="lg:col-span-8 space-y-4">
+                  
+                  {/* Dynamic Double Player Area */}
+                  <div className="relative w-full aspect-[16/9] bg-black rounded-3xl overflow-hidden border border-zinc-800 shadow-2xl shadow-red-950/10 group">
+                    {/* Blinking On-Air Overlay Indicator when any media is active */}
+                    {currentMediaType !== 'idle' && (
+                      <div className="absolute top-4 right-4 z-40 bg-red-600/90 text-white font-black text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-lg border border-red-500 animate-pulse">
+                        <span className="w-2.5 h-2.5 rounded-full bg-white block" />
+                        <span>SINAL NO AR</span>
+                      </div>
+                    )}
+
+                    {/* TV ABERTA / IPTV PLAYER (Video.js) */}
+                    <div className={`w-full h-full ${currentMediaType === 'iptv' ? '' : 'hidden'}`}>
+                      <video
+                        id="videojs-live-player"
+                        className="video-js vjs-default-skin vjs-big-play-centered w-full h-full aspect-[16/9]"
+                        controls
+                        preload="auto"
+                        playsInline
+                      />
+                    </div>
+
+                    {/* YOUTUBE IFRAME PLAYER */}
+                    {currentMediaType === 'youtube' && currentMediaUrl && (
+                      <iframe
+                        src={`${currentMediaUrl}${currentMediaUrl.includes('?') ? '&' : '?'}autoplay=1&mute=0&modestbranding=1&rel=0`}
+                        title={currentMediaTitle}
+                        frameBorder="0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                        className="w-full h-full aspect-[16/9]"
+                      />
+                    )}
+
+                    {/* PLACEHOLDER / IDLE SCREEN */}
+                    {currentMediaType === 'idle' && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black">
+                        <div className="absolute inset-0 bg-scanlines opacity-[0.04] pointer-events-none" />
+                        <div className="p-5 bg-red-600/15 rounded-full border border-red-500/30 text-[#E50914] mb-4 animate-pulse">
+                          <Tv className="w-14 h-14" />
+                        </div>
+                        <h3 className="text-lg md:text-xl font-black text-white font-sans tracking-tight">Sintonizador Cinema &amp; TV</h3>
+                        <p className="text-xs text-zinc-400 mt-2.5 max-w-md leading-relaxed">
+                          Escolha uma transmissão IPTV ao vivo no formato <span className="text-red-500 font-bold">.m3u8 / HLS</span> ou clipe do <span className="text-red-500 font-bold">YouTube</span> na barra lateral para carregar no player profissional.
+                        </p>
+                        
+                        <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
+                          <button
+                            onClick={() => mudarMidia('iptv', 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.m3u8', 'Canal 1: TV Aberta (HLS Teste)', 'Transmissão IPTV de altíssima definição no formato .m3u8 rodando diretamente com Video.js')}
+                            className="px-5 py-2.5 bg-[#E50914] hover:bg-red-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all hover:scale-[1.03] shadow-lg shadow-red-600/20 active:scale-95 cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-white" />
+                            <span>Sintonizar Canal 1</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Reproducing Info Meta Panel */}
+                  <div className="bg-zinc-900/40 border border-zinc-850 p-5 rounded-2xl space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-red-500 bg-red-950/30 px-2 py-0.5 rounded border border-red-900/20">
+                          {currentMediaType === 'iptv' ? '📺 IPTV .M3U8 HLS' : currentMediaType === 'youtube' ? '🎥 YouTube Video' : '📴 Offline'}
+                        </span>
+                        <h2 className="text-lg md:text-xl font-black text-white font-sans tracking-tight">
+                          {currentMediaTitle}
+                        </h2>
+                      </div>
+                      
+                      {currentMediaType !== 'idle' && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {currentMediaType === 'iptv' && (
+                            <button 
+                              onClick={togglePictureInPicture}
+                              className="px-3.5 py-2.5 bg-red-600/10 hover:bg-[#E50914] text-red-500 hover:text-white rounded-xl border border-red-500/30 hover:border-red-600 transition-all flex items-center gap-1.5 text-xs font-black uppercase tracking-wider shadow-lg hover:shadow-red-600/10 scale-100 hover:scale-[1.02] active:scale-95 cursor-pointer"
+                              title="Ativar Modo Picture-in-Picture (PiP)"
+                            >
+                              <PictureInPicture className="w-4 h-4 animate-pulse" />
+                              <span>Modo Flutuante (PiP)</span>
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => {
+                              playSound.click();
+                              showToast('💖 Canal salvo nos favoritos!');
+                            }}
+                            className="p-2.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-400 hover:text-white rounded-xl border border-zinc-750 transition-colors cursor-pointer"
+                            title="Curtir Canal"
+                          >
+                            <Heart className="w-4 h-4 fill-current text-zinc-400" />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              playSound.click();
+                              navigator.clipboard.writeText(window.location.href);
+                              showToast('🔗 Link do canal copiado para a área de transferência!');
+                            }}
+                            className="p-2.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-400 hover:text-white rounded-xl border border-zinc-750 transition-colors cursor-pointer"
+                            title="Compartilhar"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <p className="text-xs md:text-sm text-zinc-400 leading-relaxed font-medium">
+                      {currentMediaDesc}
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-zinc-850 text-xs font-mono text-zinc-500">
+                      <span className="flex items-center gap-1">
+                        <Coins className="w-4 h-4 text-amber-500" />
+                        <span>Espectador Premium: <span className="text-amber-400 font-bold">+5 Moedas / min</span></span>
+                      </span>
+                      <span>•</span>
+                      <span>Sinal: 1080p Full HD</span>
+                      <span>•</span>
+                      <span>CDN: Ativa &amp; Otimizada</span>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* BARRA LATERAL - LISTA DE CANAIS (COL-SPAN-4) */}
+                <div className="lg:col-span-4 bg-zinc-900/50 border border-zinc-800/80 rounded-3xl p-5 flex flex-col space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Tv className="w-4 h-4 text-[#E50914]" />
+                      <h3 className="font-sans font-black text-white text-sm uppercase tracking-wider">
+                        Radar de Canais
+                      </h3>
+                    </div>
+                    <span className="text-[10px] bg-red-950/40 border border-red-900/30 px-2.5 py-0.5 rounded-full text-red-400 font-bold font-mono uppercase tracking-wider animate-pulse">
+                      {PRECONFIGURED_BR_CHANNELS.length + customChannels.length} DISPONÍVEIS
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-zinc-400 font-medium leading-relaxed">
+                    Clique em qualquer canal ou vídeo abaixo para alternar e sintonizar instantaneamente usando o player dedicado de alto desempenho.
+                  </p>
+
+                  {/* Category Filter Tabs */}
+                  <div className="flex flex-wrap gap-1.5 pb-1">
+                    {['Todos', 'Notícias', 'Esportes', 'Desenhos', 'Cultura', 'Legislativo', 'Variedades'].map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => {
+                          playSound.click();
+                          setTvChannelFilter(cat);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                          tvChannelFilter === cat
+                            ? 'bg-[#E50914] text-white border-red-500 shadow-sm scale-105'
+                            : 'bg-zinc-950/40 text-zinc-400 hover:text-white border-zinc-800 hover:border-zinc-700'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* List of Channels */}
+                  <div className="space-y-2.5 overflow-y-auto max-h-[460px] pr-1.5 scrollbar-thin scrollbar-thumb-zinc-800">
+                    
+                    {/* Pre-configured channels */}
+                    {PRECONFIGURED_BR_CHANNELS
+                      .filter(channel => tvChannelFilter === 'Todos' || channel.category === tvChannelFilter)
+                      .map((channel) => {
+                        const isSelected = currentMediaUrl === channel.url;
+                        return (
+                          <button
+                            key={channel.id}
+                            onClick={() => mudarMidia(channel.type, channel.url, channel.title, channel.desc)}
+                            className={`w-full p-3.5 rounded-2xl flex items-start gap-3.5 border text-left transition-all hover:scale-[1.01] cursor-pointer ${
+                              isSelected
+                                ? 'bg-red-950/20 border-[#E50914] shadow-lg shadow-red-900/5'
+                                : 'bg-zinc-950/50 border-zinc-850 hover:border-zinc-700 hover:bg-zinc-900'
+                            }`}
+                          >
+                            <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-zinc-900 border border-zinc-800 relative flex items-center justify-center">
+                              <img
+                                src={channel.imageUrl}
+                                alt={channel.title}
+                                className="w-full h-full object-cover opacity-50"
+                              />
+                              <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white">
+                                {channel.type === 'youtube' ? (
+                                  <Youtube className="w-4 h-4 text-red-500 fill-red-500" />
+                                ) : (
+                                  <Tv className="w-4 h-4 text-red-500" />
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <div className="flex items-center justify-between gap-1.5">
+                                <span className="text-[8px] font-mono font-black text-red-500 uppercase tracking-widest flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse inline-block" />
+                                  <span>{channel.category}</span>
+                                </span>
+                                <span className="text-[8px] text-zinc-500 font-mono font-bold flex items-center gap-0.5">
+                                  <Flame className="w-2.5 h-2.5 text-amber-500 fill-amber-500 shrink-0" />
+                                  <span>{channel.views}</span>
+                                </span>
+                              </div>
+                              <h4 className={`text-xs font-black line-clamp-1 truncate ${isSelected ? 'text-[#E50914]' : 'text-slate-200'}`}>
+                                {channel.title}
+                              </h4>
+                              <p className="text-[10px] text-zinc-500 line-clamp-2 leading-relaxed">
+                                {channel.desc}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                    {/* Custom user-defined channels */}
+                    {customChannels.map((channel, index) => {
+                      const isSelected = currentMediaUrl === channel.url;
+                      return (
+                        <div
+                          key={`custom-${index}`}
+                          className={`w-full p-3.5 rounded-2xl flex items-start gap-3.5 border text-left transition-all hover:scale-[1.01] cursor-pointer ${
+                            isSelected
+                              ? 'bg-red-950/20 border-[#E50914] shadow-lg shadow-red-900/5'
+                              : 'bg-zinc-950/50 border-zinc-850 hover:border-zinc-700 hover:bg-zinc-900'
+                          }`}
+                          onClick={() => mudarMidia(channel.type, channel.url, channel.title, channel.desc || 'Canal Customizado sintonizado via link')}
+                        >
+                          <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-zinc-900 border border-zinc-800 relative flex items-center justify-center">
+                            <div className="text-zinc-500">
+                              {channel.type === 'iptv' ? <Tv className="w-5 h-5 text-indigo-500" /> : <Youtube className="w-5 h-5 text-red-500 fill-red-500" />}
+                            </div>
+                          </div>
+
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <div className="flex items-center justify-between gap-1.5">
+                              <span className="text-[9px] font-mono font-black text-indigo-400 uppercase tracking-widest">
+                                CANAL DO USUÁRIO
+                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  playSound.click();
+                                  const updated = customChannels.filter((_, i) => i !== index);
+                                  setCustomChannels(updated);
+                                  localStorage.setItem('gamezone_custom_channels', JSON.stringify(updated));
+                                  showToast('🗑️ Canal customizado excluído.');
+                                }}
+                                className="text-zinc-500 hover:text-red-500 transition-colors p-0.5 rounded-md"
+                                title="Excluir Canal"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <h4 className={`text-xs font-black line-clamp-1 truncate ${isSelected ? 'text-red-500' : 'text-slate-200'}`}>
+                              {channel.title}
+                            </h4>
+                            <p className="text-[10px] text-zinc-500 line-clamp-1">
+                              {channel.url}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                  </div>
+
+                  {/* Add Custom Live Link Trigger */}
+                  <button
+                    onClick={() => {
+                      playSound.click();
+                      setShowAddChannelModal(true);
+                    }}
+                    className="w-full py-3 bg-zinc-800 hover:bg-zinc-750 text-white font-bold text-xs uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 border border-zinc-700/60 cursor-pointer transition-colors mt-2"
+                  >
+                    <Plus className="w-4 h-4 text-red-500" />
+                    <span>Adicionar Minha Stream (.m3u8/YT)</span>
+                  </button>
+
+                </div>
+
+              </div>
+            </div>
+          )}
+
+          {cinemaSubTab === 'catalog' && (
+            <>
+              {/* FEATURED ANIMATED HERO CAROUSEL (HIGH-CONVERTING) */}
+              {carouselItems.length > 0 && (
             <div 
               className="relative w-full aspect-[21/9] min-h-[440px] md:min-h-[540px] flex items-end overflow-hidden select-none group/carousel" 
               id="cine-hero-carousel"
@@ -1401,9 +2240,157 @@ export const Cinema: React.FC<{
               </div>
             </div>
 
-          </div>
-        </>
-      )}
+            </div>
+          </>
+        )}
+      </>
+    )}
+
+      {/* ADD CUSTOM CHANNEL MODAL */}
+      <AnimatePresence>
+        {showAddChannelModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-zinc-950 border border-zinc-800 max-w-md w-full rounded-3xl overflow-hidden shadow-2xl text-left"
+            >
+              <div className="bg-gradient-to-r from-red-600 to-zinc-900 px-6 py-4 flex items-center justify-between border-b border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <Tv className="w-5 h-5 text-white" />
+                  <h3 className="font-sans font-black text-white text-xs uppercase tracking-wider">
+                    Sintonizar Seu Próprio Link
+                  </h3>
+                </div>
+                <button
+                  onClick={() => {
+                    playSound.click();
+                    setShowAddChannelModal(false);
+                  }}
+                  className="p-1 bg-black/40 text-slate-300 hover:text-white rounded-full cursor-pointer transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!customChannelName.trim() || !customChannelUrl.trim()) {
+                    showToast('⚠️ Por favor, preencha todos os campos.');
+                    return;
+                  }
+                  playSound.victory();
+                  const newChan = {
+                    title: customChannelName.trim(),
+                    url: customChannelUrl.trim(),
+                    type: customChannelType,
+                    desc: `Link customizado sintonizado pelo usuário. Pronto para reproduzir via ${customChannelType === 'iptv' ? 'Video.js' : 'YouTube iframe'}.`
+                  };
+                  const updated = [...customChannels, newChan];
+                  setCustomChannels(updated);
+                  localStorage.setItem('gamezone_custom_channels', JSON.stringify(updated));
+                  showToast(`📺 Canal "${newChan.title}" adicionado e sintonizado!`);
+                  mudarMidia(newChan.type, newChan.url, newChan.title, newChan.desc);
+                  setCustomChannelName('');
+                  setCustomChannelUrl('');
+                  setShowAddChannelModal(false);
+                }}
+                className="p-6 space-y-4"
+              >
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-mono font-black text-zinc-400 uppercase tracking-wider block">Tipo de Link</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playSound.click();
+                        setCustomChannelType('iptv');
+                      }}
+                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer ${
+                        customChannelType === 'iptv'
+                          ? 'bg-red-600/15 border-red-500 text-red-400'
+                          : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      TV Ao Vivo (.m3u8 / HLS)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playSound.click();
+                        setCustomChannelType('youtube');
+                      }}
+                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer ${
+                        customChannelType === 'youtube'
+                          ? 'bg-red-600/15 border-red-500 text-red-400'
+                          : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      Vídeo YouTube (Embed)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono font-black text-zinc-400 uppercase tracking-wider block">Nome do Canal</label>
+                  <input
+                    type="text"
+                    value={customChannelName}
+                    onChange={(e) => setCustomChannelName(e.target.value)}
+                    placeholder="Ex: TV Local / Meu Gameplay"
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 focus:border-red-600 focus:outline-none rounded-xl text-xs text-white placeholder-zinc-500"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono font-black text-zinc-400 uppercase tracking-wider block">URL Completa do Stream</label>
+                  <input
+                    type="url"
+                    value={customChannelUrl}
+                    onChange={(e) => setCustomChannelUrl(e.target.value)}
+                    placeholder={customChannelType === 'iptv' ? 'https://dominio.com/canal.m3u8' : 'https://www.youtube.com/embed/VIDEO_ID'}
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 focus:border-red-600 focus:outline-none rounded-xl text-xs text-white placeholder-zinc-500 font-mono"
+                    required
+                  />
+                  <p className="text-[9px] text-zinc-500 leading-relaxed font-mono mt-1">
+                    {customChannelType === 'iptv' 
+                      ? 'IPTV requer um link .m3u8 direto compatível com HLS Streaming CORS.' 
+                      : 'O link do YouTube deve ser no formato de incorporação (embed) para permitir reprodução iframe.'}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-900">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound.click();
+                      setShowAddChannelModal(false);
+                    }}
+                    className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-xs font-bold rounded-xl text-zinc-300 transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-red-600 hover:bg-red-500 text-xs font-black rounded-xl text-white transition-all hover:scale-105 cursor-pointer shadow-lg active:scale-95 flex items-center gap-1.5"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    <span>Adicionar Stream</span>
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* YOUTUBE AND CINEMATIC MEDIA MODAL WITH PLAYBACK */}
       <AnimatePresence>
