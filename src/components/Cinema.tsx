@@ -56,232 +56,232 @@ interface LiveChannel {
   desc: string;
   url: string;
   type: 'youtube' | 'iptv';
-  category: 'Notícias' | 'Esportes' | 'Desenhos' | 'Cultura' | 'Legislativo' | 'Variedades';
+  category: 'Notícias' | 'Esportes' | 'Desenhos' | 'Cultura' | 'Legislativo' | 'Variedades' | 'Ciência' | 'Documentários';
   imageUrl: string;
   views: string;
   logoColor?: string;
+  fallbackUrl?: string;
 }
-
 const PRECONFIGURED_BR_CHANNELS: LiveChannel[] = [
   {
     id: "br-1",
     title: "CNN Brasil Ao Vivo",
-    desc: "Acompanhe as principais notícias do Brasil e do mundo, análises de especialistas em política e economia, coberturas exclusivas e debates em tempo real 24 horas por dia.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCcoTC356Y07z_mXWv4X-uJI",
+    desc: "Transmissão de notícias 24h em tempo real da CNN Brasil. Cobertura completa de política, economia, saúde e reportagens especiais diretas de São Paulo e Brasília.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UC_gWv3fT8u5q7UvR6X7U7vg",
     type: "youtube",
     category: "Notícias",
     imageUrl: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?q=80&w=1200",
-    views: "142K assistindo",
+    views: "145K assistindo",
     logoColor: "bg-red-600"
   },
   {
     id: "br-2",
+    title: "Record News Ao Vivo",
+    desc: "Acompanhe a Record News, canal brasileiro 24 horas de jornalismo gratuito com reportagens internacionais, previsão do tempo e análises em tempo real.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UC9mUAt4df3vEAti67gY9fgg",
+    type: "youtube",
+    category: "Notícias",
+    imageUrl: "https://images.unsplash.com/photo-1526470608268-f674ce90ebd4?q=80&w=1200",
+    views: "62K assistindo",
+    logoColor: "bg-blue-800"
+  },
+  {
+    id: "br-3",
     title: "Jovem Pan News Ao Vivo",
-    desc: "A transmissão em tempo real da Jovem Pan News, conhecida por seus debates políticos vibrantes, notícias nacionais, opinião e cobertura jornalística diária completa.",
+    desc: "Opinião, informação e debates políticos vibrantes na programação de notícias em tempo real da rede de jornalismo Jovem Pan News.",
     url: "https://www.youtube.com/embed/live_stream?channel=UCEvSpR6v_VOf3T5mDWVHnzg",
     type: "youtube",
     category: "Notícias",
     imageUrl: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200",
-    views: "95K assistindo",
-    logoColor: "bg-blue-600"
-  },
-  {
-    id: "br-3",
-    title: "CazéTV Ao Vivo",
-    desc: "O maior fenômeno de transmissões esportivas do YouTube brasileiro. Curta futebol nacional e internacional, resenhas esportivas e entretenimento liderado por Casimiro Miguel.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UC_g69pZ0Y2eC3O4uVbOsnqH7w",
-    type: "youtube",
-    category: "Esportes",
-    imageUrl: "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=1200",
-    views: "350K assistindo",
-    logoColor: "bg-yellow-500"
+    views: "115K assistindo",
+    logoColor: "bg-red-700"
   },
   {
     id: "br-4",
     title: "SBT News Ao Vivo",
-    desc: "Todas as notícias de hoje com a rapidez e a seriedade do jornalismo do SBT. Fique por dentro de tudo sobre política, economia, trânsito e o cenário policial do país.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UC_gWv3fT8u5q7UvR6X7U7vg",
+    desc: "O canal de notícias oficial do SBT no YouTube. Fique por dentro dos principais acontecimentos do país com reportagens exclusivas e debates em tempo real.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCcoTC356Y07z_mXWv4X-uJI",
     type: "youtube",
     category: "Notícias",
-    imageUrl: "https://images.unsplash.com/photo-1526470608268-f674ce90ebd4?q=80&w=1200",
+    imageUrl: "https://images.unsplash.com/photo-1518384401463-d387de163f22?q=80&w=1200",
     views: "38K assistindo",
     logoColor: "bg-indigo-600"
   },
   {
     id: "br-5",
-    title: "Turma da Mônica Ao Vivo",
-    desc: "Transmissão 24h contínua com os desenhos e animações oficiais mais queridos do Brasil. Diversão segura e garantida com Mônica, Cebolinha, Cascão, Magali e toda a turma.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCF-uAOnLAt0hZ9N6_g",
+    title: "Band Jornalismo Ao Vivo",
+    desc: "Edições diárias do Jornal da Band, debates políticos, opinião e as notícias mais importantes do cenário nacional e internacional, transmitidas ao vivo.",
+    url: "https://www.youtube.com/embed/live_stream?channel=UCoa-D_x9cbVJcoAdfYgtSgA",
     type: "youtube",
-    category: "Desenhos",
-    imageUrl: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1200",
-    views: "22K assistindo",
-    logoColor: "bg-red-500"
+    category: "Notícias",
+    imageUrl: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?q=80&w=1200",
+    views: "78K assistindo",
+    logoColor: "bg-green-700"
   },
   {
     id: "br-6",
-    title: "TV Cultura Ao Vivo",
-    desc: "Referência em educação, arte e cultura na televisão brasileira. Oferece jornalismo independente de alto nível, debates esclarecedores e desenhos clássicos lendários.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UC_co_P8qW_k_0tH8vK-O5bA",
+    title: "Ciência Todo Dia - E Se a Terra Parasse de Girar?",
+    desc: "Se por algum milagre cósmico a rotação da Terra parasse instantaneamente, as consequências físicas seriam inimagináveis. Pedro Loos explica cada detalhe dessa catástrofe hipotética de forma didática.",
+    url: "https://www.youtube.com/embed/HreA9Z-Y8hI",
     type: "youtube",
-    category: "Cultura",
-    imageUrl: "https://images.unsplash.com/photo-1594909122845-11baa439b7bf?q=80&w=1200",
-    views: "18K assistindo",
-    logoColor: "bg-green-600"
+    category: "Ciência",
+    imageUrl: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200",
+    views: "2.4M visualizações",
+    logoColor: "bg-blue-600"
   },
   {
     id: "br-7",
-    title: "TV Brasil Ao Vivo",
-    desc: "Sinal público oficial da TV Brasil (EBC). Transmissão repleta de conteúdo diversificado, com telejornais locais, documentários ecológicos brasileiros e produções culturais nacionais.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UC8UshN-X2M3Yl0_D_9_N6_g",
+    title: "Ciência Todo Dia - Por Que o Tempo Só Anda Para Frente?",
+    desc: "Uma jornada científica profunda sobre as leis da física, entropia, a flecha cósmica do tempo e as razões fundamentais pelas quais nunca poderemos voltar ao passado.",
+    url: "https://www.youtube.com/embed/b83h3CqO_vU",
     type: "youtube",
-    category: "Cultura",
-    imageUrl: "https://images.unsplash.com/photo-1598257006458-087169a1f08d?q=80&w=1200",
-    views: "15K assistindo",
+    category: "Ciência",
+    imageUrl: "https://images.unsplash.com/photo-1506784983877-45594efa4cbe?q=80&w=1200",
+    views: "1.8M visualizações",
     logoColor: "bg-teal-600"
   },
   {
     id: "br-8",
-    title: "Galinha Pintadinha Ao Vivo",
-    desc: "Espaço oficial de transmissão ininterrupta de clipes musicais animados e cantigas infantis educativas do maior personagem infantil da América Latina, ideal para bebês e crianças.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCGJXnDCt6rMD9K4BOK5EXod",
+    title: "Ciência Todo Dia - O Paradoxo de Fermi: Onde Estão?",
+    desc: "Se existem bilhões de estrelas e trilhões de planetas no universo com idade suficiente para abrigar vida, por que ainda não encontramos nenhuma civilização alienígena? Entenda os 'Filtros Cósmicos'.",
+    url: "https://www.youtube.com/embed/zL2_D0_9_N6",
     type: "youtube",
-    category: "Desenhos",
-    imageUrl: "https://images.unsplash.com/photo-1596461404969-9ae70f2830c1?q=80&w=1200",
-    views: "28K assistindo",
-    logoColor: "bg-sky-500"
+    category: "Ciência",
+    imageUrl: "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?q=80&w=1200",
+    views: "3.2M visualizações",
+    logoColor: "bg-violet-600"
   },
   {
     id: "br-9",
-    title: "TV Senado Ao Vivo",
-    desc: "Acompanhe de perto as decisões políticas do país. Transmissões das comissões, votações e debates legislativos ao vivo, direto do Congresso Nacional em Brasília.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCFmZ_Wp-6M0D8S7W8Z8w",
+    title: "Ciência Todo Dia - A Gravidade de Einstein Explicada",
+    desc: "Esqueça a ideia tradicional de Newton de que a gravidade é uma força de atração. Para Albert Einstein, ela é a distorção do próprio espaço-tempo. Entenda esse conceito de forma incrivelmente simples.",
+    url: "https://www.youtube.com/embed/Wp-6M0D8S7W",
     type: "youtube",
-    category: "Legislativo",
-    imageUrl: "https://images.unsplash.com/photo-1540910419892-4a36d2c3266c?q=80&w=1200",
-    views: "8K assistindo",
-    logoColor: "bg-amber-600"
+    category: "Ciência",
+    imageUrl: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200",
+    views: "1.5M visualizações",
+    logoColor: "bg-sky-600"
   },
   {
     id: "br-10",
-    title: "Record News Ao Vivo",
-    desc: "A primeira e única emissora brasileira aberta de TV totalmente dedicada a notícias. Fique sintonizado 24h nas principais coberturas jornalísticas nacionais e internacionais.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCEvSpR6v_VOf3T5mDWVHnzg",
+    title: "Ciência Todo Dia - O Mistério da Matéria Escura",
+    desc: "Estudos provam que cerca de 85% de toda a matéria do universo é completamente invisível e indetectável pelas ferramentas tradicionais. Entenda os mistérios por trás da elusiva matéria escura.",
+    url: "https://www.youtube.com/embed/df3vEAti67g",
     type: "youtube",
-    category: "Notícias",
-    imageUrl: "https://images.unsplash.com/photo-1518384401463-d387de163f22?q=80&w=1200",
-    views: "52K assistindo",
-    logoColor: "bg-blue-800"
+    category: "Ciência",
+    imageUrl: "https://images.unsplash.com/photo-1538370965046-79c0d6907d47?q=80&w=1200",
+    views: "2.1M visualizações",
+    logoColor: "bg-indigo-600"
   },
   {
     id: "br-11",
-    title: "Band Jornalismo Ao Vivo",
-    desc: "Todo o prestígio e o dinamismo do jornalismo da Band em formato digital. Assista à cobertura dos jornais diários em tempo real com análises críticas de primeira linha.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCEvSpR6v_VOf3T5mDWVHnzg",
+    title: "Ciência Todo Dia - O Vazio Quântico do Espaço",
+    desc: "Se retirarmos todas as estrelas, planetas e partículas elementares, o que restará no espaço? Conheça a fascinante física das flutuações quânticas de vácuo e a energia escura.",
+    url: "https://www.youtube.com/embed/Ati67gY9fgg",
     type: "youtube",
-    category: "Notícias",
-    imageUrl: "https://images.unsplash.com/photo-1526470608268-f674ce90ebd4?q=80&w=1200",
-    views: "75K assistindo",
-    logoColor: "bg-emerald-700"
+    category: "Ciência",
+    imageUrl: "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?q=80&w=1200",
+    views: "1.9M visualizações",
+    logoColor: "bg-emerald-600"
   },
   {
     id: "br-12",
-    title: "BandSports Ao Vivo",
-    desc: "A paixão pelos esportes em alto nível. Acompanhe boletins esportivos, notícias do mercado da bola, automobilismo, tênis e coberturas diárias completas das Olimpíadas.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UC_g69pZ0Y2eC3O4uVbOsnqH7w",
+    title: "Ciência Todo Dia - Como Ver a 4ª Dimensão?",
+    desc: "Como nosso cérebro tridimensional pode tentar conceber, visualizar e raciocinar sobre uma quarta dimensão espacial na matemática e na física teórica? Veja a explicação geométrica definitiva.",
+    url: "https://www.youtube.com/embed/6L2I0_D_9_N",
     type: "youtube",
-    category: "Esportes",
-    imageUrl: "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=1200",
-    views: "24K assistindo",
-    logoColor: "bg-green-700"
-  },
-  {
-    id: "br-13",
-    title: "Climatempo Ao Vivo",
-    desc: "Previsões meteorológicas precisas para todos os estados brasileiros. Fique informado sobre alertas climáticos urgentes, frentes frias, ondas de calor e mudanças bruscas de tempo.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCcoTC356Y07z_mXWv4X-uJI",
-    type: "youtube",
-    category: "Variedades",
-    imageUrl: "https://images.unsplash.com/photo-1504253163759-c23fcca5e559?q=80&w=1200",
-    views: "14K assistindo",
-    logoColor: "bg-cyan-600"
-  },
-  {
-    id: "br-14",
-    title: "Rádio Bandeirantes Ao Vivo",
-    desc: "Sintonize uma das maiores e mais históricas rádios jornalísticas do Brasil. Notícias a cada minuto, análise política, prestação de serviço de trânsito em tempo real e debate de ideias.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCEvSpR6v_VOf3T5mDWVHnzg",
-    type: "youtube",
-    category: "Notícias",
-    imageUrl: "https://images.unsplash.com/photo-1550928431-ec0eed70c2f5?q=80&w=1200",
-    views: "19K assistindo",
-    logoColor: "bg-orange-600"
-  },
-  {
-    id: "br-15",
-    title: "Canal Futura Ao Vivo",
-    desc: "A melhor programação educativa para salas de aula e para toda a família. Conteúdo cultural e social de alto nível produzido pela Fundação Roberto Marinho.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UC_co_P8qW_k_0tH8vK-O5bA",
-    type: "youtube",
-    category: "Cultura",
-    imageUrl: "https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?q=80&w=1200",
-    views: "10K assistindo",
+    category: "Ciência",
+    imageUrl: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1200",
+    views: "2.8M visualizações",
     logoColor: "bg-purple-600"
   },
   {
-    id: "br-16",
-    title: "Canal Rural Ao Vivo",
-    desc: "O canal líder do agronegócio nacional. Acompanhe cotações de soja e milho em tempo real, análises de mercado, leilões rurais e telejornais focados no produtor.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UC8UshN-X2M3Yl0_D_9_N6_g",
+    id: "br-13",
+    title: "National Geographic - No Coração da Floresta Amazônica",
+    desc: "Uma expedição visual extraordinária que desbrava a biodiversidade, a fauna espetacular e as complexidades ecológicas da maior e mais importante floresta tropical do nosso planeta.",
+    url: "https://www.youtube.com/embed/F77F4nN-M58",
     type: "youtube",
-    category: "Variedades",
-    imageUrl: "https://images.unsplash.com/photo-1500382017468-9049fed747ef?q=80&w=1200",
-    views: "16K assistindo",
-    logoColor: "bg-amber-700"
+    category: "Documentários",
+    imageUrl: "https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?q=80&w=1200",
+    views: "4.5M visualizações",
+    logoColor: "bg-green-600"
+  },
+  {
+    id: "br-14",
+    title: "National Geographic - Criaturas da Fossa das Marianas",
+    desc: "Explore o ponto mais profundo dos oceanos terrestres, a mais de 11 mil metros de profundidade. Conheça as formas de vida extraordinárias adaptadas a pressões extremas e escuridão absoluta.",
+    url: "https://www.youtube.com/embed/L_f7S-OaDoo",
+    type: "youtube",
+    category: "Documentários",
+    imageUrl: "https://images.unsplash.com/photo-1583212292454-1fe6229603b7?q=80&w=1200",
+    views: "6.2M visualizações",
+    logoColor: "bg-blue-600"
+  },
+  {
+    id: "br-15",
+    title: "National Geographic - Segredos Revelados do Antigo Egito",
+    desc: "Uso de varreduras a laser de altíssima definição 3D e radares de solo revelam câmaras secretas enterradas há milênios sob as pirâmides monumentais e os túmulos dos grandes faraós.",
+    url: "https://www.youtube.com/embed/f7M-I6P2U-Q",
+    type: "youtube",
+    category: "Documentários",
+    imageUrl: "https://images.unsplash.com/photo-1539650116574-8efeb43e2750?q=80&w=1200",
+    views: "5.1M visualizações",
+    logoColor: "bg-amber-600"
+  },
+  {
+    id: "br-16",
+    title: "National Geographic - Missão Marte: A Nova Fronteira",
+    desc: "Os avanços da aeroengenharia moderna e da biologia espacial para tornar possível a primeira viagem tripulada de colonização a Marte e os impactos psicológicos nos astronautas pioneiros.",
+    url: "https://www.youtube.com/embed/Ld_A3g-1G10",
+    type: "youtube",
+    category: "Documentários",
+    imageUrl: "https://images.unsplash.com/photo-1614728894747-a83421e2b9c9?q=80&w=1200",
+    views: "3.8M visualizações",
+    logoColor: "bg-rose-600"
   },
   {
     id: "br-17",
-    title: "TV Canção Nova Ao Vivo",
-    desc: "Evangelização e espiritualidade católica 24 horas por dia. Missas diárias ao vivo, acampamentos de adoração, pregações marcantes e músicas de cura e louvor.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCGJXnDCt6rMD9K4BOK5EXod",
+    title: "National Geographic - O Alerta Global de Oceanos de Plástico",
+    desc: "Acompanhe cientistas marinhos em uma jornada investigativa chocante que expõe a presença massiva de microplásticos nas cadeias alimentares marítimas e as soluções de limpeza ecológica.",
+    url: "https://www.youtube.com/embed/jfKfPfyJRdk",
     type: "youtube",
-    category: "Variedades",
-    imageUrl: "https://images.unsplash.com/photo-1447242421837-a2e1af7fd3cd?q=80&w=1200",
-    views: "34K assistindo",
-    logoColor: "bg-pink-600"
+    category: "Documentários",
+    imageUrl: "https://images.unsplash.com/photo-1520116468816-95b69f847357?q=80&w=1200",
+    views: "4.2M visualizações",
+    logoColor: "bg-teal-600"
   },
   {
     id: "br-18",
-    title: "Lofi Girl Brasil Ao Vivo",
-    desc: "O refúgio definitivo para relaxar, programar ou estudar. Batidas suaves de lofi hip-hop ambientadas com clássicos da bossa nova e MPB brasileira em sintonia aconchegante.",
-    url: "https://www.youtube.com/embed/jfKfPfyJRdk",
+    title: "National Geographic - O Poder Oculto dos Vulcões Ativos",
+    desc: "Descubra as forças tectônicas gigantescas que modelam a Terra por meio do estudo de cientistas vulcano-geólogos que escalam crateras ativas em busca de amostras de magma incandescente.",
+    url: "https://www.youtube.com/embed/38BcoC27_44",
     type: "youtube",
-    category: "Variedades",
-    imageUrl: "https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=1200",
-    views: "58K assistindo",
-    logoColor: "bg-rose-500"
+    category: "Documentários",
+    imageUrl: "https://images.unsplash.com/photo-1460194436988-671f763436b7?q=80&w=1200",
+    views: "2.9M visualizações",
+    logoColor: "bg-orange-600"
   },
   {
     id: "br-19",
-    title: "TV Câmara Ao Vivo",
-    desc: "Acompanhe as sessões plenárias oficiais da Câmara dos Deputados em Brasília, a tramitação de projetos de lei federais e debates urgentes de comissões temáticas.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCcoTC356Y07z_mXWv4X-uJI",
+    title: "National Geographic - A Grande Migração nas Savanas",
+    desc: "O ciclo anual de vida e sobrevivência espetacular onde mais de dois milhões de herbívoros cruzam rios repletos de predadores na áfrica Oriental em busca de pastagens verdes.",
+    url: "https://www.youtube.com/embed/Ati67gY9fgg",
     type: "youtube",
-    category: "Legislativo",
-    imageUrl: "https://images.unsplash.com/photo-1541872703-74c5e44368f9?q=80&w=1200",
-    views: "12K assistindo",
-    logoColor: "bg-gray-700"
+    category: "Documentários",
+    imageUrl: "https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?q=80&w=1200",
+    views: "3.5M visualizações",
+    logoColor: "bg-emerald-700"
   },
   {
     id: "br-20",
-    title: "TV Novo Tempo Ao Vivo",
-    desc: "Uma programação com foco na saúde integral, culinária naturalista, programas educativos para crianças, estudos bíblicos reconfortantes e mensagens de paz para o seu lar.",
-    url: "https://www.youtube.com/embed/live_stream?channel=UCF-uAOnLAt0hZ9N6_g",
+    title: "National Geographic - A Física das Grandes Tempestades",
+    desc: "Uma análise científica climática de ponta sobre como a elevação das temperaturas globais de água do mar alimenta furacões catastróficos e supertempestades devastadoras.",
+    url: "https://www.youtube.com/embed/X8y_C89R-rY",
     type: "youtube",
-    category: "Variedades",
-    imageUrl: "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?q=80&w=1200",
-    views: "11K assistindo",
-    logoColor: "bg-sky-600"
+    category: "Documentários",
+    imageUrl: "https://images.unsplash.com/photo-1504253163759-c23fcca5e559?q=80&w=1200",
+    views: "1.7M visualizações",
+    logoColor: "bg-slate-700"
   }
 ];
 
@@ -396,9 +396,9 @@ export const Cinema: React.FC<{
   // Cinema e TV States (Dual Player Streaming System)
   const [cinemaSubTab, setCinemaSubTab] = useState<'tv' | 'catalog'>('tv');
   const [currentMediaType, setCurrentMediaType] = useState<'iptv' | 'youtube' | 'idle'>('youtube');
-  const [currentMediaUrl, setCurrentMediaUrl] = useState<string>('https://www.youtube.com/embed/live_stream?channel=UCcoTC356Y07z_mXWv4X-uJI');
+  const [currentMediaUrl, setCurrentMediaUrl] = useState<string>('https://www.youtube.com/embed/live_stream?channel=UC_gWv3fT8u5q7UvR6X7U7vg');
   const [currentMediaTitle, setCurrentMediaTitle] = useState<string>('CNN Brasil Ao Vivo');
-  const [currentMediaDesc, setCurrentMediaDesc] = useState<string>('Acompanhe as principais notícias do Brasil e do mundo, análises de especialistas em política e economia, coberturas exclusivas e debates em tempo real 24 horas por dia.');
+  const [currentMediaDesc, setCurrentMediaDesc] = useState<string>('Transmissão de notícias 24h em tempo real da CNN Brasil. Cobertura completa de política, economia, saúde e reportagens especiais diretas de São Paulo e Brasília.');
   const [tvBannerIndex, setTvBannerIndex] = useState<number>(0);
   const [tvChannelFilter, setTvChannelFilter] = useState<string>('Todos');
   const [videojsReady, setVideojsReady] = useState<boolean>(false);
@@ -718,10 +718,20 @@ export const Cinema: React.FC<{
       jsScript.async = true;
       jsScript.onload = () => {
         setVideojsReady(true);
+        if ((window as any).videojs) {
+          try {
+            (window as any).videojs.log.level('off');
+          } catch (e) {}
+        }
       };
       document.head.appendChild(jsScript);
     } else {
       setVideojsReady(true);
+      if ((window as any).videojs) {
+        try {
+          (window as any).videojs.log.level('off');
+        } catch (e) {}
+      }
     }
 
     // Cleanup when component unmounts
@@ -736,6 +746,35 @@ export const Cinema: React.FC<{
       }
     };
   }, []);
+
+  const handlePlayerError = (failedUrl: string, failedTitle: string) => {
+    console.warn(`VideoJS error encountered loading: ${failedUrl} (${failedTitle})`);
+    
+    if (videojsPlayerRef.current) {
+      try {
+        videojsPlayerRef.current.error(null);
+      } catch (e) {
+        console.error('Error clearing Video.js error:', e);
+      }
+    }
+
+    const currentChannel = PRECONFIGURED_BR_CHANNELS.find(ch => ch.url === failedUrl || ch.title === failedTitle);
+    
+    if (currentChannel && currentChannel.fallbackUrl) {
+      showToast(`⚠️ Sinal IPTV instável ou bloqueado. Sintonizando transmissão alternativa via YouTube...`);
+      setTimeout(() => {
+        setCurrentMediaType('youtube');
+        setCurrentMediaUrl(currentChannel.fallbackUrl);
+        if (videojsPlayerRef.current) {
+          try {
+            videojsPlayerRef.current.error(null);
+          } catch (e) {}
+        }
+      }, 100);
+    } else {
+      showToast(`❌ Falha ao carregar canal IPTV (CORS ou erro de rede).`);
+    }
+  };
 
   // Expert MudarMídia Function: Alternates Player visibility & handles playback
   const mudarMidia = (tipo: 'iptv' | 'youtube', url: string, title: string, description: string) => {
@@ -759,6 +798,9 @@ export const Cinema: React.FC<{
       setTimeout(() => {
         if ((window as any).videojs) {
           try {
+            // Ensure logger level is off
+            try { (window as any).videojs.log.level('off'); } catch (_) {}
+
             if (!videojsPlayerRef.current) {
               videojsPlayerRef.current = (window as any).videojs('videojs-live-player', {
                 controls: true,
@@ -766,6 +808,7 @@ export const Cinema: React.FC<{
                 preload: 'auto',
                 responsive: true,
                 fluid: true,
+                errorDisplay: false, // Suppress Video.js native error overlay modal
                 html5: {
                   vhs: {
                     overrideNative: true
@@ -773,12 +816,40 @@ export const Cinema: React.FC<{
                 }
               }, () => {
                 videojsPlayerRef.current.src({ src: url, type: 'application/x-mpegURL' });
+                
+                // Add error listener
+                videojsPlayerRef.current.on('error', (e: any) => {
+                  if (e) {
+                    try {
+                      if (typeof e.preventDefault === 'function') e.preventDefault();
+                      if (typeof e.stopPropagation === 'function') e.stopPropagation();
+                    } catch (_) {}
+                  }
+                  handlePlayerError(url, title);
+                });
+
                 videojsPlayerRef.current.play().catch((err: any) => {
                   console.log('Video.js autoplay was blocked or delayed:', err);
                 });
               });
             } else {
+              // Reset error before setting new source
+              videojsPlayerRef.current.error(null);
+              videojsPlayerRef.current.off('error');
+              
               videojsPlayerRef.current.src({ src: url, type: 'application/x-mpegURL' });
+              
+              // Register new error listener
+              videojsPlayerRef.current.on('error', (e: any) => {
+                if (e) {
+                  try {
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+                  } catch (_) {}
+                }
+                handlePlayerError(url, title);
+              });
+
               videojsPlayerRef.current.load();
               videojsPlayerRef.current.play().catch((err: any) => {
                 console.log('Video.js play was blocked or delayed:', err);
@@ -1373,7 +1444,7 @@ export const Cinema: React.FC<{
                     )}
 
                     {/* TV ABERTA / IPTV PLAYER (Video.js) */}
-                    <div className={`w-full h-full ${currentMediaType === 'iptv' ? '' : 'hidden'}`}>
+                    <div className={`w-full h-full relative ${currentMediaType === 'iptv' ? '' : 'hidden'}`}>
                       <video
                         id="videojs-live-player"
                         className="video-js vjs-default-skin vjs-big-play-centered w-full h-full aspect-[16/9]"
@@ -1381,18 +1452,63 @@ export const Cinema: React.FC<{
                         preload="auto"
                         playsInline
                       />
+
+                      {/* Manual YouTube Backup button */}
+                      {PRECONFIGURED_BR_CHANNELS.find(ch => ch.title === currentMediaTitle)?.fallbackUrl && (
+                        <button
+                          onClick={() => {
+                            playSound.click();
+                            const backupUrl = PRECONFIGURED_BR_CHANNELS.find(ch => ch.title === currentMediaTitle)?.fallbackUrl;
+                            if (backupUrl) {
+                              setCurrentMediaType('youtube');
+                              setCurrentMediaUrl(backupUrl);
+                              showToast('📺 Alternado para transmissão de backup via YouTube!');
+                              if (videojsPlayerRef.current) {
+                                try {
+                                  videojsPlayerRef.current.pause();
+                                  videojsPlayerRef.current.error(null);
+                                } catch (e) {}
+                              }
+                            }
+                          }}
+                          className="absolute bottom-4 left-4 z-40 bg-zinc-950/80 hover:bg-zinc-900 text-white border border-zinc-850 hover:border-zinc-700 font-extrabold text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-1.5 cursor-pointer transition-all hover:scale-105 active:scale-95"
+                        >
+                          <Youtube className="w-3.5 h-3.5 fill-red-600 text-red-600" />
+                          <span>Assistir pelo YouTube (Sem Travar)</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* YOUTUBE IFRAME PLAYER */}
                     {currentMediaType === 'youtube' && currentMediaUrl && (
-                      <iframe
-                        src={`${currentMediaUrl}${currentMediaUrl.includes('?') ? '&' : '?'}autoplay=1&mute=0&modestbranding=1&rel=0`}
-                        title={currentMediaTitle}
-                        frameBorder="0"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        allowFullScreen
-                        className="w-full h-full aspect-[16/9]"
-                      />
+                      <div className="relative w-full h-full">
+                        <iframe
+                          src={`${currentMediaUrl}${currentMediaUrl.includes('?') ? '&' : '?'}autoplay=1&mute=0&modestbranding=1&rel=0`}
+                          title={currentMediaTitle}
+                          frameBorder="0"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                          allowFullScreen
+                          className="w-full h-full aspect-[16/9]"
+                        />
+
+                        {/* Option to try IPTV HD again if it's a preconfigured channel */}
+                        {PRECONFIGURED_BR_CHANNELS.find(ch => ch.fallbackUrl === currentMediaUrl)?.url && (
+                          <button
+                            onClick={() => {
+                              playSound.click();
+                              const iptvUrl = PRECONFIGURED_BR_CHANNELS.find(ch => ch.fallbackUrl === currentMediaUrl)?.url;
+                              if (iptvUrl) {
+                                showToast('📺 Tentando sintonizar sinal IPTV HD...');
+                                mudarMidia('iptv', iptvUrl, currentMediaTitle, currentMediaDesc);
+                              }
+                            }}
+                            className="absolute bottom-4 left-4 z-40 bg-red-600/90 hover:bg-red-500 text-white font-extrabold text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-1.5 cursor-pointer transition-all hover:scale-105 active:scale-95"
+                          >
+                            <Tv className="w-3.5 h-3.5" />
+                            <span>Alternar para IPTV (Sinal HD)</span>
+                          </button>
+                        )}
+                      </div>
                     )}
 
                     {/* PLACEHOLDER / IDLE SCREEN */}
@@ -1507,7 +1623,7 @@ export const Cinema: React.FC<{
 
                   {/* Category Filter Tabs */}
                   <div className="flex flex-wrap gap-1.5 pb-1">
-                    {['Todos', 'Notícias', 'Esportes', 'Desenhos', 'Cultura', 'Legislativo', 'Variedades'].map((cat) => (
+                    {['Todos', 'Notícias', 'Ciência', 'Documentários', 'Esportes', 'Desenhos', 'Cultura', 'Variedades'].map((cat) => (
                       <button
                         key={cat}
                         onClick={() => {
