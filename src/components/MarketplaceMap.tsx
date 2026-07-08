@@ -23,7 +23,11 @@ import {
   X,
   PlusCircle,
   TrendingUp,
-  Award
+  Award,
+  Search,
+  MessageSquare,
+  ThumbsUp,
+  Tag
 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 
@@ -273,6 +277,98 @@ export const MarketplaceMap: React.FC<MarketplaceMapProps> = ({
   const [showCreateStorePanel, setShowCreateStorePanel] = useState<boolean>(false);
   const [showCreateProductPanel, setShowCreateProductPanel] = useState<boolean>(false);
 
+  // Enhanced Storefront & Facade states
+  const [searchStoreQuery, setSearchStoreQuery] = useState('');
+  const [selectedStoreCategory, setSelectedStoreCategory] = useState('todos');
+  const [activeStoreSubTab, setActiveStoreSubTab] = useState<'produtos' | 'chat' | 'cupons'>('produtos');
+  const [copiedCoupon, setCopiedCoupon] = useState<string | null>(null);
+  
+  const [storeLikes, setStoreLikes] = useState<Record<string, number>>(() => {
+    const cached = localStorage.getItem('gamezone_store_likes');
+    return cached ? JSON.parse(cached) : {
+      'store-saopaulo': 48,
+      'store-riodejaneiro': 35,
+      'store-curitiba': 52
+    };
+  });
+
+  const [likedStores, setLikedStores] = useState<string[]>(() => {
+    const cached = localStorage.getItem('gamezone_user_liked_stores');
+    return cached ? JSON.parse(cached) : [];
+  });
+
+  const [chatMessages, setChatMessages] = useState<Array<{sender: 'user' | 'owner', text: string, time: string}>>([]);
+  const [isTyping, setIsTyping] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('gamezone_user_liked_stores', JSON.stringify(likedStores));
+  }, [likedStores]);
+
+  // Reset search and category, and set initial greeting when a store is opened
+  useEffect(() => {
+    if (selectedStore) {
+      setSearchStoreQuery('');
+      setSelectedStoreCategory('todos');
+      setActiveStoreSubTab('produtos');
+      setChatMessages([
+        { 
+          sender: 'owner', 
+          text: `Olá! Bem-vindo à fachada oficial da minha loja "${selectedStore.name}". Sinta-se à vontade para tirar dúvidas clicando nos botões de chat ou explore nossa vitrine abaixo! 🛒✨`, 
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+        }
+      ]);
+    }
+  }, [selectedStore]);
+
+  const handleLikeStore = (storeId: string) => {
+    playSound.click();
+    if (likedStores.includes(storeId)) {
+      setLikedStores(prev => prev.filter(id => id !== storeId));
+      setStoreLikes(prev => {
+        const updated = { ...prev, [storeId]: Math.max(0, (prev[storeId] || 0) - 1) };
+        localStorage.setItem('gamezone_store_likes', JSON.stringify(updated));
+        return updated;
+      });
+      addLog('earn', `Removeu curtida da loja de afiliado`, 0, 'coins');
+    } else {
+      setLikedStores(prev => [...prev, storeId]);
+      setStoreLikes(prev => {
+        const updated = { ...prev, [storeId]: (prev[storeId] || 0) + 1 };
+        localStorage.setItem('gamezone_store_likes', JSON.stringify(updated));
+        return updated;
+      });
+      // Reward the user 5 coins for liking a store!
+      updateStats(prev => ({ ...prev, coins: prev.coins + 5 }));
+      addLog('earn', `Curtiu a loja gamer de afiliado! Ganhou +5 moedas.`, 5, 'coins');
+    }
+  };
+
+  const PREDEFINED_QUESTIONS = [
+    { id: 'frete', label: '🚚 O frete é grátis?', reply: 'Sim! Quase todas as minhas indicações têm o selo de Frete Grátis pelo parceiro de envio. Aproveite para economizar!' },
+    { id: 'estoque', label: '📦 Tem em estoque?', reply: 'Com certeza! Só recomendo produtos que estão com estoque ativo e envio imediato pelas maiores varejistas do Brasil.' },
+    { id: 'seguro', label: '🔒 É realmente seguro comprar?', reply: '100% seguro! Você compra direto no site oficial (Amazon, Mercado Livre, Kabum), com garantia de entrega e devolução.' },
+    { id: 'desconto', label: '🔥 Consigo cupom extra?', reply: 'Sim! Use o cupom "ARENAGAMER" no fechamento do pedido na loja parceira para tentar descontos especiais de parceiros.' }
+  ];
+
+  const handleSendPredefinedQuestion = (text: string, reply: string) => {
+    playSound.click();
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    // Add user question
+    setChatMessages(prev => [...prev, { sender: 'user', text, time: timeStr }]);
+    setIsTyping(true);
+
+    // Simulate store owner replying with realistic latency
+    setTimeout(() => {
+      setChatMessages(prev => [...prev, { 
+        sender: 'owner', 
+        text: reply, 
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+      }]);
+      setIsTyping(false);
+    }, 1200);
+  };
+
   // Map Filter Coordinates center (defaults to São Paulo)
   const [mapCenter, setMapCenter] = useState({ lat: -23.5505, lng: -46.6333 });
   const [selectedCityName, setSelectedCityName] = useState('São Paulo/SP');
@@ -493,7 +589,9 @@ export const MarketplaceMap: React.FC<MarketplaceMapProps> = ({
 
   return (
     <div className="space-y-8 animate-fadeIn text-left">
-      {/* Introduction banner */}
+      {!(showStoreProductsModal && selectedStore) && (
+        <>
+          {/* Introduction banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-2 z-10">
           <div className="inline-flex items-center gap-1.5 bg-yellow-400 text-slate-950 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest font-mono">
@@ -959,282 +1057,627 @@ export const MarketplaceMap: React.FC<MarketplaceMapProps> = ({
           })}
         </div>
       </div>
+      </>)}
 
-      {/* SINGLE STORE PRODUCTS EXPLORE DRAWER MODAL */}
-      <AnimatePresence>
-        {showStoreProductsModal && selectedStore && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white border-2 border-indigo-600 rounded-3xl w-full max-w-4xl max-h-[85vh] overflow-hidden shadow-2xl flex flex-col text-left"
-            >
-              {/* Header with store info */}
-              <div className={`p-6 ${selectedStore.bannerColor} text-white shrink-0 relative flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <span className="text-3xl bg-white/10 p-2 rounded-2xl backdrop-blur-md border border-white/20">{selectedStore.userAvatar}</span>
-                    <div>
-                      <h3 className="text-lg md:text-xl font-black uppercase tracking-tight leading-none">{selectedStore.name}</h3>
-                      <p className="text-xs text-indigo-200 mt-1 font-mono">Inaugurada por {selectedStore.userName} | Sede: {selectedStore.city}</p>
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-200 max-w-2xl leading-relaxed">{selectedStore.description}</p>
-                </div>
+      {/* SINGLE STORE PRODUCTS EXPLORE PAGE (IMPROVED PREMIUM STOREFRONT & VISUAL FACADE) */}
+      <AnimatePresence mode="wait">
+        {showStoreProductsModal && selectedStore && (() => {
+          const storeProducts = products.filter(p => p.storeId === selectedStore.id);
+          const filteredProducts = storeProducts.filter(p => {
+            const matchesSearch = p.title.toLowerCase().includes(searchStoreQuery.toLowerCase()) || 
+                                  p.description.toLowerCase().includes(searchStoreQuery.toLowerCase());
+            const matchesCategory = selectedStoreCategory === 'todos' || p.category === selectedStoreCategory;
+            return matchesSearch && matchesCategory;
+          });
 
-                <div className="shrink-0 flex items-center gap-2">
-                  {loggedInUser && (selectedStore.userId === loggedInUser.uid || selectedStore.userId === loggedInUser.email) && (
-                    <button
-                      onClick={() => { playSound.click(); setShowCreateProductPanel(!showCreateProductPanel); }}
-                      className="px-3.5 py-2 bg-yellow-400 hover:bg-yellow-350 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1 shadow-md transition-colors cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" /> Adicionar Produto
-                    </button>
-                  )}
+          // Determine dynamic physical awning (toldo) colors based on selected store branding
+          const getAwningStripes = (banner: string) => {
+            if (banner.includes('purple') || banner.includes('pink')) {
+              return { main: 'bg-purple-600', stripe: 'bg-pink-100', text: 'text-purple-400', border: 'border-purple-600' };
+            }
+            if (banner.includes('emerald') || banner.includes('teal')) {
+              return { main: 'bg-emerald-600', stripe: 'bg-emerald-100', text: 'text-emerald-400', border: 'border-emerald-600' };
+            }
+            if (banner.includes('yellow') || banner.includes('orange')) {
+              return { main: 'bg-amber-500', stripe: 'bg-yellow-100', text: 'text-amber-500', border: 'border-amber-500' };
+            }
+            if (banner.includes('slate') || banner.includes('dark')) {
+              return { main: 'bg-slate-800', stripe: 'bg-slate-200', text: 'text-slate-400', border: 'border-slate-850' };
+            }
+            return { main: 'bg-indigo-600', stripe: 'bg-indigo-100', text: 'text-indigo-400', border: 'border-indigo-600' };
+          };
+
+          const colors = getAwningStripes(selectedStore.bannerColor);
+          const isOwner = loggedInUser && (selectedStore.userId === loggedInUser.uid || selectedStore.userId === loggedInUser.email);
+          const currentLikes = storeLikes[selectedStore.id] || 0;
+          const userHasLiked = likedStores.includes(selectedStore.id);
+
+          return (
+            <div className="space-y-6">
+              {/* Navigational Back Button / Breadcrumbs */}
+              <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-3xl shadow-lg animate-fadeIn">
+                <div className="flex items-center gap-3">
                   <button
                     onClick={() => { playSound.click(); setShowStoreProductsModal(false); }}
-                    className="p-2 bg-slate-950/40 hover:bg-slate-950/60 text-white rounded-xl cursor-pointer"
+                    className="flex items-center gap-1.5 px-4 py-2 bg-yellow-400 hover:bg-yellow-350 text-slate-950 font-black text-xs rounded-xl cursor-pointer transition-all hover:scale-[1.02] shadow-md border border-yellow-500"
                   >
-                    <X className="w-4 h-4" />
+                    ← Voltar para o Radar de Lojas
                   </button>
+                  <span className="text-slate-600 font-mono text-xs">/</span>
+                  <span className="text-yellow-400/90 font-mono text-xs uppercase tracking-wider font-extrabold hidden sm:inline">Vitrine Virtual</span>
+                </div>
+                <div className="text-right text-xs text-slate-400 font-mono">
+                  Loja ID: <span className="text-yellow-400 font-bold">{selectedStore.id}</span>
                 </div>
               </div>
 
-              {/* CREATE PRODUCT FORM PANEL FOR THIS STORE */}
-              {showCreateProductPanel && (
-                <div className="p-6 border-b border-slate-200 bg-slate-50/80 max-h-[40vh] overflow-y-auto">
-                  <div className="flex items-center justify-between pb-3 border-b mb-4">
-                    <h4 className="text-xs font-black uppercase text-indigo-900 tracking-wider flex items-center gap-1">
-                      <PlusCircle className="w-4 h-4 text-indigo-600" /> Cadastrar Novo Produto de Afiliado nesta Loja
-                    </h4>
-                    <button 
-                      onClick={() => setShowCreateProductPanel(false)}
-                      className="text-xs font-bold text-slate-400 hover:text-slate-600 cursor-pointer"
-                    >
-                      Cancelar
-                    </button>
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 15 }}
+                className={`bg-white border-2 ${colors.border} rounded-3xl w-full overflow-hidden shadow-2xl flex flex-col text-left`}
+              >
+                {/* 1. PHYSICAL FACADE RETRO AWNING (Toldo Listrado Gamer) */}
+                <div className="relative w-full h-7 overflow-hidden flex shrink-0 z-20 shadow-md">
+                  <div className="absolute inset-0 flex">
+                    {[...Array(20)].map((_, i) => (
+                      <div 
+                        key={i} 
+                        className={`flex-1 h-full transform -skew-x-12 ${
+                          i % 2 === 0 ? colors.main : colors.stripe
+                        }`} 
+                      />
+                    ))}
+                  </div>
+                  {/* Facade wave trim */}
+                  <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-slate-950/10 backdrop-blur-xs flex">
+                    {[...Array(20)].map((_, i) => (
+                      <div 
+                        key={i} 
+                        className={`flex-1 h-2 rounded-b-full ${colors.main} -mt-0.5`} 
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* 2. FACHADA DA LOJA: Main Visual Banner Header */}
+                <div className={`p-6 ${selectedStore.bannerColor} text-white shrink-0 relative flex flex-col md:flex-row md:items-center justify-between gap-5 border-b border-white/10`}>
+                  
+                  {/* Subtle Neon Glow Grid Overlay */}
+                  <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,_transparent_1px),_linear-gradient(90deg,_rgba(255,255,255,0.03)_1px,_transparent_1px)] bg-[size:16px_16px] opacity-20 pointer-events-none" />
+
+                  <div className="space-y-3 z-10">
+                    <div className="flex items-center gap-3.5">
+                      <span className="text-4xl bg-white/15 p-2 rounded-2xl backdrop-blur-lg border border-white/25 flex items-center justify-center shadow-lg">
+                        {selectedStore.userAvatar}
+                      </span>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-none text-white drop-shadow-sm">
+                            {selectedStore.name}
+                          </h3>
+                          
+                          {/* Glowing Online indicator */}
+                          <span className="bg-emerald-500 text-slate-950 text-[8px] font-black uppercase px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                            <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping" /> LOJA ABERTA
+                          </span>
+                        </div>
+                        
+                        <p className="text-xs text-white/80 mt-1 font-mono flex items-center gap-1">
+                          <span>Inaugurada por <strong>{selectedStore.userName}</strong></span>
+                          <span>•</span>
+                          <span className="text-yellow-300 font-bold">★ 4.9 (Excelente)</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-slate-100 max-w-2xl leading-relaxed italic opacity-95">
+                      "{selectedStore.description}"
+                    </p>
                   </div>
 
-                  {prodFormError && (
-                    <div className="mb-4 p-2.5 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600 font-medium">
-                      {prodFormError}
-                    </div>
-                  )}
-                  {prodFormSuccess && (
-                    <div className="mb-4 p-2.5 bg-emerald-50 border border-emerald-100 rounded-xl text-xs text-emerald-600 font-bold">
-                      {prodFormSuccess}
-                    </div>
-                  )}
+                  {/* Fachada Fast Interaction Controls */}
+                  <div className="shrink-0 flex flex-wrap items-center gap-2.5 z-10 bg-slate-950/20 p-2.5 rounded-2xl backdrop-blur-md border border-white/10">
+                    
+                    {/* Thumbs up Like counter */}
+                    <button
+                      onClick={() => handleLikeStore(selectedStore.id)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wide flex items-center gap-1.5 transition-all shadow-md cursor-pointer ${
+                        userHasLiked
+                          ? 'bg-yellow-400 text-slate-950 scale-103'
+                          : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
+                      }`}
+                      title="Curtir Loja & Ganhar Recompensa"
+                    >
+                      <ThumbsUp className="w-3.5 h-3.5 shrink-0" />
+                      <span>{currentLikes} Curtidas</span>
+                    </button>
 
-                  <form onSubmit={handleAddProductToStore} className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-600 mb-1">Título do Produto Gamer *</label>
-                        <input
-                          type="text"
-                          placeholder="Ex: Mouse Mecânico Pro 24000DPI"
-                          value={newProdTitle}
-                          onChange={(e) => setNewProdTitle(e.target.value)}
-                          className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
-                        />
+                    {isOwner && (
+                      <button
+                        onClick={() => { playSound.click(); setShowCreateProductPanel(!showCreateProductPanel); }}
+                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 border border-indigo-400/30 text-white font-extrabold text-xs rounded-xl flex items-center gap-1 shadow-md transition-colors cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Indicar Produto
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => { playSound.click(); setShowStoreProductsModal(false); }}
+                      className="p-1.5 bg-slate-950/40 hover:bg-slate-950/60 text-white rounded-xl cursor-pointer transition-colors"
+                      title="Fechar Vitrine"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. STOREFRONT NAVIGATION SUB-TABS */}
+                <div className="flex bg-slate-100 border-b border-slate-200 shrink-0">
+                  <button
+                    onClick={() => { playSound.click(); setActiveStoreSubTab('produtos'); }}
+                    className={`flex-1 py-3 text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-b-2 ${
+                      activeStoreSubTab === 'produtos'
+                        ? 'border-indigo-600 text-indigo-600 bg-white font-black'
+                        : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                    }`}
+                  >
+                    <ShoppingBag className="w-4 h-4 text-indigo-600" /> Vitrine Gamer ({filteredProducts.length})
+                  </button>
+                  <button
+                    onClick={() => { playSound.click(); setActiveStoreSubTab('chat'); }}
+                    className={`flex-1 py-3 text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-b-2 ${
+                      activeStoreSubTab === 'chat'
+                        ? 'border-indigo-600 text-indigo-600 bg-white font-black'
+                        : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                    }`}
+                  >
+                    <MessageSquare className="w-4 h-4 text-emerald-600 animate-bounce" /> Fale com o Vendedor
+                  </button>
+                  <button
+                    onClick={() => { playSound.click(); setActiveStoreSubTab('cupons'); }}
+                    className={`flex-1 py-3 text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-b-2 ${
+                      activeStoreSubTab === 'cupons'
+                        ? 'border-indigo-600 text-indigo-600 bg-white font-black'
+                        : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Tag className="w-4 h-4 text-amber-500" /> Cupons Ativos
+                  </button>
+                </div>
+
+                {/* CREATE PRODUCT FORM PANEL FOR THIS STORE */}
+                {showCreateProductPanel && isOwner && (
+                  <div className="p-5 border-b border-slate-200 bg-indigo-50/50 max-h-[35vh] overflow-y-auto shrink-0 animate-fadeIn">
+                    <div className="flex items-center justify-between pb-3 border-b border-indigo-100 mb-4">
+                      <h4 className="text-xs font-black uppercase text-indigo-950 tracking-wider flex items-center gap-1.5">
+                        <PlusCircle className="w-4.5 h-4.5 text-indigo-600" /> Cadastrar Novo Produto de Afiliado nesta Loja
+                      </h4>
+                      <button 
+                        onClick={() => setShowCreateProductPanel(false)}
+                        className="text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer bg-white px-2 py-0.5 rounded-md shadow-xs border"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+
+                    {prodFormError && (
+                      <div className="mb-4 p-2.5 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600 font-medium">
+                        {prodFormError}
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                    )}
+                    {prodFormSuccess && (
+                      <div className="mb-4 p-2.5 bg-emerald-50 border border-emerald-100 rounded-xl text-xs text-emerald-600 font-bold">
+                        {prodFormSuccess}
+                      </div>
+                    )}
+
+                    <form onSubmit={handleAddProductToStore} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-3">
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-600 mb-1">Preço (R$) *</label>
+                          <label className="block text-[10px] font-bold text-slate-600 mb-1">Título do Produto Gamer *</label>
                           <input
-                            type="number"
-                            step="0.01"
-                            placeholder="Ex: 249.90"
-                            value={newProdPrice}
-                            onChange={(e) => setNewProdPrice(e.target.value)}
-                            className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                            type="text"
+                            placeholder="Ex: Mouse Mecânico Pro 24000DPI"
+                            value={newProdTitle}
+                            onChange={(e) => setNewProdTitle(e.target.value)}
+                            className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
                           />
                         </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-600 mb-1">Preço (R$) *</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              placeholder="Ex: 249.90"
+                              value={newProdPrice}
+                              onChange={(e) => setNewProdPrice(e.target.value)}
+                              className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-mono font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-600 mb-1">Desconto (%)</label>
+                            <input
+                              type="number"
+                              placeholder="Ex: 10"
+                              value={newProdDiscount}
+                              onChange={(e) => setNewProdDiscount(e.target.value)}
+                              className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-600 mb-1">Desconto (%)</label>
+                          <label className="block text-[10px] font-bold text-slate-600 mb-1">Link de Afiliado Seguro *</label>
                           <input
-                            type="number"
-                            placeholder="Ex: 10"
-                            value={newProdDiscount}
-                            onChange={(e) => setNewProdDiscount(e.target.value)}
-                            className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                            type="text"
+                            placeholder="Ex: https://mercadolivre.com.br/item..."
+                            value={newProdLink}
+                            onChange={(e) => setNewProdLink(e.target.value)}
+                            className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-mono text-[10px]"
                           />
                         </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-600 mb-1">Link de Afiliado Seguro *</label>
-                        <input
-                          type="text"
-                          placeholder="Ex: https://mercadolivre.com.br/item..."
-                          value={newProdLink}
-                          onChange={(e) => setNewProdLink(e.target.value)}
-                          className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-600 mb-1">Plataforma *</label>
-                          <select
-                            value={newProdPlatform}
-                            onChange={(e) => setNewProdPlatform(e.target.value)}
-                            className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700 font-bold"
-                          >
-                            <option value="Mercado Livre">Mercado Livre</option>
-                            <option value="Amazon Brasil">Amazon Brasil</option>
-                            <option value="Shopee Brasil">Shopee Brasil</option>
-                            <option value="Kabum">Kabum</option>
-                            <option value="AliExpress">AliExpress</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-600 mb-1">Categoria *</label>
-                          <select
-                            value={newProdCategory}
-                            onChange={(e) => setNewProdCategory(e.target.value)}
-                            className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700 font-bold"
-                          >
-                            <option value="perifericos">⌨️ Periféricos</option>
-                            <option value="hardwares">⚙️ Hardware</option>
-                            <option value="cadeiras">💺 Cadeiras</option>
-                            <option value="consoles">🎮 Consoles</option>
-                          </select>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-600 mb-1">Plataforma *</label>
+                            <select
+                              value={newProdPlatform}
+                              onChange={(e) => setNewProdPlatform(e.target.value)}
+                              className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700 font-bold"
+                            >
+                              <option value="Mercado Livre">Mercado Livre</option>
+                              <option value="Amazon Brasil">Amazon Brasil</option>
+                              <option value="Shopee Brasil">Shopee Brasil</option>
+                              <option value="Kabum">Kabum</option>
+                              <option value="AliExpress">AliExpress</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-600 mb-1">Categoria *</label>
+                            <select
+                              value={newProdCategory}
+                              onChange={(e) => setNewProdCategory(e.target.value)}
+                              className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700 font-bold"
+                            >
+                              <option value="perifericos">⌨️ Periféricos</option>
+                              <option value="hardwares">⚙️ Hardware</option>
+                              <option value="cadeiras">💺 Cadeiras</option>
+                              <option value="consoles">🎮 Consoles</option>
+                            </select>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-600 mb-1">URL Imagem ou escolha predefinida:</label>
-                        <input
-                          type="text"
-                          placeholder="Cole link de imagem..."
-                          value={newProdImg}
-                          onChange={(e) => setNewProdImg(e.target.value)}
-                          className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                        />
-                        <div className="flex flex-wrap gap-1.5 mt-2">
-                          {PRESET_STORE_IMAGES.slice(0, 4).map((im, idx) => (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-600 mb-1">URL Imagem ou escolha rápida:</label>
+                          <input
+                            type="text"
+                            placeholder="Cole link de imagem..."
+                            value={newProdImg}
+                            onChange={(e) => setNewProdImg(e.target.value)}
+                            className="w-full p-2 bg-white border rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                          />
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {PRESET_STORE_IMAGES.slice(0, 4).map((im, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => handleSelectFormImg(im.url)}
+                                className={`px-1.5 py-0.5 rounded bg-slate-200 hover:bg-slate-300 border text-[9px] font-semibold ${
+                                  newProdImg === im.url ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-300'
+                                }`}
+                              >
+                                {im.name.split(' ')[0]}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <button
+                          type="submit"
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[10px] rounded-lg uppercase tracking-wider transition-colors shadow cursor-pointer mt-1"
+                        >
+                          🚀 Publicar Produto de Afiliado
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+
+                {/* 4. DYNAMIC SUB-TAB VIEWS */}
+                <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+                  
+                  {/* --- SUB-TAB A: VITRINE DE PRODUTOS --- */}
+                  {activeStoreSubTab === 'produtos' && (
+                    <div className="space-y-6">
+                      {/* Products visual filters & Search for fast navigation */}
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm shrink-0">
+                        
+                        {/* Instant Search input */}
+                        <div className="relative w-full sm:max-w-xs">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            placeholder="Buscar nesta vitrine..."
+                            value={searchStoreQuery}
+                            onChange={(e) => setSearchStoreQuery(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-250 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                          />
+                        </div>
+
+                        {/* Store category shelf pills */}
+                        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none w-full sm:w-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+                          {[
+                            { id: 'todos', label: 'Ver Todos' },
+                            { id: 'perifericos', label: '⌨️ Periféricos' },
+                            { id: 'hardwares', label: '⚙️ Hardware' },
+                            { id: 'cadeiras', label: '💺 Cadeiras' },
+                            { id: 'consoles', label: '🎮 Consoles' }
+                          ].map((cat) => (
                             <button
-                              key={idx}
-                              type="button"
-                              onClick={() => handleSelectFormImg(im.url)}
-                              className={`px-1.5 py-0.5 rounded bg-slate-200 hover:bg-slate-300 border text-[9px] font-semibold ${
-                                newProdImg === im.url ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-300'
+                              key={cat.id}
+                              onClick={() => { playSound.click(); setSelectedStoreCategory(cat.id); }}
+                              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold tracking-tight whitespace-nowrap cursor-pointer transition-colors ${
+                                selectedStoreCategory === cat.id
+                                  ? 'bg-slate-900 text-white'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
                               }`}
                             >
-                              {im.name.split(' ')[0]}
+                              {cat.label}
                             </button>
                           ))}
                         </div>
                       </div>
-                      <button
-                        type="submit"
-                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[10px] rounded-lg uppercase tracking-wider transition-colors shadow cursor-pointer mt-1"
-                      >
-                        🚀 Publicar Produto de Afiliado
-                      </button>
+
+                      {/* Filtered products layout */}
+                      {filteredProducts.length === 0 ? (
+                        <div className="text-center py-16 space-y-3 bg-white border rounded-3xl p-6 shadow-sm">
+                          <ShoppingBag className="w-14 h-14 text-slate-300 mx-auto animate-pulse" />
+                          <h4 className="text-sm font-black text-slate-700">Nenhum item encontrado nesta prateleira</h4>
+                          <p className="text-xs text-slate-450 max-w-sm mx-auto leading-relaxed">
+                            Ajuste os filtros de categoria ou faça outra busca para achar periféricos e hardwares gamer indicados.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                          {filteredProducts.map((prod) => {
+                            const discPrice = prod.price * (1 - prod.discount / 100);
+                            
+                            return (
+                              <div 
+                                key={prod.id}
+                                className="group bg-white border border-slate-200 rounded-3xl overflow-hidden hover:shadow-xl hover:border-indigo-400/50 transition-all duration-300 flex flex-col justify-between"
+                              >
+                                {/* Imagem do produto */}
+                                <div className="relative aspect-[16/10] overflow-hidden bg-slate-950">
+                                  <img
+                                    src={prod.imageUrl}
+                                    alt={prod.title}
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover opacity-95 group-hover:scale-105 transition-all duration-500"
+                                  />
+                                  
+                                  {/* Badge de desconto */}
+                                  {prod.discount > 0 && (
+                                    <span className="absolute top-3 left-3 bg-red-600 text-white text-[9px] font-black px-2 py-0.5 rounded-lg shadow-md animate-pulse">
+                                      🔥 {prod.discount}% OFF
+                                    </span>
+                                  )}
+
+                                  {prod.freeShipping && (
+                                    <span className="absolute top-3 right-3 bg-emerald-600 text-white text-[8px] font-black px-2 py-0.5 rounded-lg shadow">
+                                      🚚 FRETE GRÁTIS
+                                    </span>
+                                  )}
+
+                                  {isOwner && (
+                                    <button
+                                      onClick={(e) => handleDeleteAffProduct(prod.id, e)}
+                                      className="absolute bottom-3 right-3 p-1.5 bg-red-700/90 text-white rounded-lg hover:bg-red-650 shadow transition-colors cursor-pointer border border-red-500/20"
+                                      title="Excluir Produto"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+
+                                <div className="p-4.5 space-y-3.5 flex-1 flex flex-col justify-between">
+                                  <div className="space-y-1.5 text-left">
+                                    <div className="flex justify-between items-center text-[9px]">
+                                      <span className="uppercase font-black tracking-widest text-indigo-600 font-mono">
+                                        {prod.platform}
+                                      </span>
+                                      <span className="text-amber-500 font-bold flex items-center gap-0.5">
+                                        ★ {prod.rating}
+                                      </span>
+                                    </div>
+                                    <h4 className="text-xs font-black text-slate-900 line-clamp-1 group-hover:text-indigo-600 transition-colors">
+                                      {prod.title}
+                                    </h4>
+                                    <p className="text-[10px] text-slate-500 line-clamp-2 leading-relaxed h-7">
+                                      {prod.description}
+                                    </p>
+                                  </div>
+
+                                  <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                                    <div>
+                                      {prod.discount > 0 && (
+                                        <span className="text-[9px] text-slate-400 line-through block font-mono">
+                                          De R$ {prod.price.toFixed(2)}
+                                        </span>
+                                      )}
+                                      <span className="text-sm font-black text-slate-950 font-mono">
+                                        R$ {discPrice.toFixed(2)}
+                                      </span>
+                                    </div>
+
+                                    <button
+                                      onClick={() => handleOpenAffLink(prod)}
+                                      className="px-3.5 py-2 bg-yellow-400 hover:bg-yellow-350 text-slate-950 font-black text-[10px] rounded-xl flex items-center gap-1 cursor-pointer border border-yellow-500 shadow-md transition-all active:scale-95"
+                                    >
+                                      Ver Link <ExternalLink className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </form>
-                </div>
-              )}
+                  )}
 
-              {/* Vitrine Products grid inside the store */}
-              <div className="flex-1 overflow-y-auto p-6">
-                {products.filter(p => p.storeId === selectedStore.id).length === 0 ? (
-                  <div className="text-center py-12 space-y-2">
-                    <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto" />
-                    <h4 className="text-sm font-bold text-slate-700">Nenhum produto cadastrado nesta vitrine ainda</h4>
-                    <p className="text-xs text-slate-400 max-w-sm mx-auto">Adicione produtos de afiliados com seus links para que outros usuários possam encontrá-los e comprar!</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {products.filter(p => p.storeId === selectedStore.id).map((prod) => {
-                      const discPrice = prod.price * (1 - prod.discount / 100);
-                      const isOwner = loggedInUser && (selectedStore.userId === loggedInUser.uid || selectedStore.userId === loggedInUser.email);
-
-                      return (
-                        <div 
-                          key={prod.id}
-                          className="group bg-slate-50 border border-slate-200/60 rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col justify-between"
-                        >
-                          <div className="relative aspect-[16/10] overflow-hidden bg-slate-900">
-                            <img
-                              src={prod.imageUrl}
-                              alt={prod.title}
-                              referrerPolicy="no-referrer"
-                              className="w-full h-full object-cover opacity-90 group-hover:scale-103 transition-transform"
-                            />
-                            {prod.discount > 0 && (
-                              <span className="absolute top-2.5 left-2.5 bg-yellow-400 text-slate-950 text-[9px] font-black px-2 py-0.5 rounded shadow">
-                                🔥 {prod.discount}% OFF
-                              </span>
-                            )}
-
-                            {isOwner && (
-                              <button
-                                onClick={(e) => handleDeleteAffProduct(prod.id, e)}
-                                className="absolute top-2.5 right-2.5 p-1.5 bg-red-650 text-white rounded-lg hover:bg-red-550 shadow transition-colors cursor-pointer"
-                                title="Excluir Produto"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
-                            <div className="space-y-1">
-                              <div className="flex justify-between items-center text-[9px] text-slate-400">
-                                <span className="uppercase font-bold tracking-wider text-slate-500 font-mono">{prod.platform}</span>
-                                <span className="text-amber-500 font-bold">★ {prod.rating}</span>
-                              </div>
-                              <h4 className="text-xs font-black text-slate-800 line-clamp-1 group-hover:text-indigo-600 transition-colors">
-                                {prod.title}
-                              </h4>
-                              <p className="text-[10px] text-slate-500 line-clamp-2 leading-relaxed h-7">
-                                {prod.description}
-                              </p>
-                            </div>
-
-                            <div className="flex items-center justify-between pt-2 border-t border-slate-200/50">
-                              <div>
-                                {prod.discount > 0 && <span className="text-[9px] text-slate-400 line-through block">De R$ {prod.price.toFixed(2)}</span>}
-                                <span className="text-xs font-black text-slate-900 font-mono">
-                                  R$ {discPrice.toFixed(2)}
-                                </span>
-                              </div>
-
-                              <button
-                                onClick={() => handleOpenAffLink(prod)}
-                                className="px-3.5 py-1.5 bg-yellow-400 hover:bg-yellow-350 text-slate-950 font-black text-[10px] rounded-lg flex items-center gap-1.5 cursor-pointer border border-yellow-500"
-                              >
-                                Ver Link <ExternalLink className="w-3 h-3" />
-                              </button>
-                            </div>
+                  {/* --- SUB-TAB B: FALE COM O VENDEDOR (CHAT SIMULATOR) --- */}
+                  {activeStoreSubTab === 'chat' && (
+                    <div className="max-w-2xl mx-auto bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm flex flex-col h-[400px]">
+                      
+                      {/* Chat header bar */}
+                      <div className="bg-slate-900 text-white p-3.5 px-4 flex items-center justify-between shrink-0">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-xl bg-white/10 p-1.5 rounded-xl">{selectedStore.userAvatar}</span>
+                          <div>
+                            <h4 className="text-xs font-black uppercase tracking-wider text-white leading-none">
+                              Suporte {selectedStore.name.split(' ')[0]}
+                            </h4>
+                            <span className="text-[9px] text-emerald-400 font-mono font-bold flex items-center gap-1 mt-0.5">
+                              <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" /> Online para Dúvidas
+                            </span>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+                        <span className="text-[9px] font-mono text-slate-400">Canal Seguro</span>
+                      </div>
 
-              {/* Close footer */}
-              <div className="p-4 bg-slate-50 border-t shrink-0 flex items-center justify-end">
-                <button
-                  onClick={() => setShowStoreProductsModal(false)}
-                  className="px-5 py-2 bg-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-300 cursor-pointer"
-                >
-                  Fechar Vitrine
-                </button>
-              </div>
+                      {/* Chat messages viewport */}
+                      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 text-left flex flex-col">
+                        {chatMessages.map((msg, i) => (
+                          <div 
+                            key={i}
+                            className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed shadow-xs flex flex-col ${
+                              msg.sender === 'user'
+                                ? 'bg-indigo-600 text-white rounded-tr-none self-end'
+                                : 'bg-white border text-slate-800 rounded-tl-none self-start'
+                            }`}
+                          >
+                            <span className="font-semibold block text-[10px] opacity-80 mb-0.5">
+                              {msg.sender === 'user' ? 'Você' : selectedStore.userName}
+                            </span>
+                            <p>{msg.text}</p>
+                            <span className="text-[8px] opacity-60 self-end mt-1 font-mono">{msg.time}</span>
+                          </div>
+                        ))}
 
-            </motion.div>
-          </div>
-        )}
+                        {/* Typing feedback loader */}
+                        {isTyping && (
+                          <div className="bg-white border text-slate-800 rounded-2xl rounded-tl-none p-3 text-xs self-start max-w-[200px] flex items-center gap-1 shadow-xs font-mono">
+                            <span className="text-slate-400">{selectedStore.userName} está digitando</span>
+                            <span className="animate-bounce">.</span>
+                            <span className="animate-bounce" style={{ animationDelay: '0.2s' }}>.</span>
+                            <span className="animate-bounce" style={{ animationDelay: '0.4s' }}>.</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Predefined Instant Smart Questions for Fast UI Navigation */}
+                      <div className="bg-slate-100 p-3.5 border-t shrink-0">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2 font-mono">
+                          ⚡ Clique em uma pergunta para obter resposta instantânea:
+                        </span>
+                        
+                        <div className="flex flex-wrap gap-2">
+                          {PREDEFINED_QUESTIONS.map((q) => (
+                            <button
+                              key={q.id}
+                              disabled={isTyping}
+                              onClick={() => handleSendPredefinedQuestion(q.label, q.reply)}
+                              className="px-3 py-1.5 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 hover:text-indigo-600 border rounded-xl text-[10px] font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1 text-left"
+                            >
+                              <span>❓ {q.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                    </div>
+                  )}
+
+                  {/* --- SUB-TAB C: COUPONS & DISCOUNTS --- */}
+                  {activeStoreSubTab === 'cupons' && (
+                    <div className="max-w-xl mx-auto space-y-4 animate-fadeIn">
+                      <div className="bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 p-5 rounded-3xl shadow-md text-left space-y-1.5 relative overflow-hidden">
+                        <div className="absolute right-0 top-0 translate-x-4 -translate-y-4 text-7xl opacity-10">🎫</div>
+                        <h4 className="text-sm font-black uppercase tracking-wider flex items-center gap-1.5">
+                          <Award className="w-5 h-5 animate-spin" style={{ animationDuration: '4s' }} /> Cupons de Afiliado Exclusivos
+                        </h4>
+                        <p className="text-xs leading-relaxed max-w-md font-bold">
+                          Copie os códigos promocionais ativos para aplicar no carrinho de compras das lojas parceiras e ganhar descontos adicionais em sua compra!
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4.5">
+                        {[
+                          { code: 'ARENAGAMER', value: '10% OFF', desc: 'Válido em todos os periféricos recomendados nesta vitrine.' },
+                          { code: 'TECLADO50', value: 'R$ 50 OFF', desc: 'Válido para compras de teclados mecânicos importados selecionados.' },
+                          { code: 'FPSPOWER', value: '5% EXTRA', desc: 'Desconto extra em mouses gamer de alta performance e mousepads.' },
+                          { code: 'SETUP2026', value: 'FRETE GRÁTIS', desc: 'Garante frete grátis em qualquer produto de hardware ou cadeira gamer.' }
+                        ].map((cup) => (
+                          <div 
+                            key={cup.code} 
+                            className="bg-white border rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs hover:border-amber-400 transition-all text-left"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="bg-amber-50 text-amber-600 text-[10px] font-black border border-amber-200 px-2 py-0.5 rounded">
+                                  {cup.value}
+                                </span>
+                                <h5 className="font-extrabold text-xs text-slate-800 tracking-tight">{cup.desc}</h5>
+                              </div>
+                              <p className="text-[10px] text-slate-400">Cupom de parceria ativa certificado pela Arena Gamer.</p>
+                            </div>
+
+                            <button
+                              onClick={() => {
+                                playSound.click();
+                                navigator.clipboard.writeText(cup.code);
+                                setCopiedCoupon(cup.code);
+                                setTimeout(() => setCopiedCoupon(null), 2000);
+                              }}
+                              className={`px-4 py-2 rounded-xl text-xs font-black tracking-wider transition-all min-w-[120px] text-center cursor-pointer ${
+                                copiedCoupon === cup.code
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-slate-900 hover:bg-slate-850 text-yellow-400 border border-yellow-400/20'
+                              }`}
+                            >
+                              {copiedCoupon === cup.code ? '✓ Copiado!' : `Copiar: ${cup.code}`}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+
+                {/* 5. STOREFRONT FOOTER WITH CLOSE ACTION */}
+                <div className="p-4 bg-slate-50 border-t border-slate-200 shrink-0 flex items-center justify-between">
+                  <p className="text-[10px] text-slate-400 font-mono hidden sm:block">
+                    🔒 Conexão segura e autenticada com {selectedStore.userName}'s Storefront
+                  </p>
+                  
+                  <button
+                    onClick={() => { playSound.click(); setShowStoreProductsModal(false); }}
+                    className="px-6 py-2.5 bg-slate-950 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer transition-colors"
+                  >
+                    Fechar Loja
+                  </button>
+                </div>
+
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* AFFILIATE EXTERNAL REDIRECT MODAL FOR STORES */}
