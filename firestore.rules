@@ -1,0 +1,76 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Default catch-all rule blocking all unauthorized operations
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Standard authentication and identification helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // 2. userProfile validation and security
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['coins', 'lives', 'currentStage', 'highScore', 'realBalance'])
+          && data.coins is number
+          && data.lives is number
+          && data.currentStage is number
+          && data.highScore is number
+          && data.realBalance is number;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow update: if isOwner(userId) && isValidUserProfile(request.resource.data);
+    }
+
+    // 3. movieItem validation and security
+    function isValidMovieItem(data) {
+      return data.keys().hasAll(['id', 'title', 'description', 'category', 'year', 'rating', 'duration', 'imageUrl'])
+          && data.id is string && data.id.size() <= 100
+          && data.title is string && data.title.size() <= 200
+          && data.description is string && data.description.size() <= 1000
+          && data.category is string && data.category.size() <= 50
+          && data.year is number
+          && data.rating is string && data.rating.size() <= 10
+          && data.duration is string && data.duration.size() <= 30
+          && data.imageUrl is string && data.imageUrl.size() <= 1000000;
+    }
+
+    match /movies/{movieId} {
+      allow read: if true; // anyone can load cinema items
+      allow create: if isSignedIn() && isValidMovieItem(request.resource.data) && request.resource.data.uploaderId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.uploaderId == request.auth.uid;
+    }
+
+    // 4. transactionLog validation and security
+    function isValidTransactionLog(data) {
+      return data.keys().hasAll(['id', 'userId', 'timestamp', 'type', 'description', 'amount', 'currency', 'status'])
+          && data.id is string && data.id.size() <= 100
+          && data.userId is string && data.userId.size() <= 128
+          && data.timestamp is string && data.timestamp.size() <= 100
+          && data.type is string && data.type.size() <= 50
+          && data.description is string && data.description.size() <= 500
+          && data.amount is number
+          && data.currency is string && data.currency.size() <= 10
+          && data.status is string && data.status.size() <= 20;
+    }
+
+    match /users/{userId}/logs/{logId} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId); // secure list enforcer checking user identity
+      allow create: if isOwner(userId) && isValidTransactionLog(request.resource.data);
+    }
+  }
+}

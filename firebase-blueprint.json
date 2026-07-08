@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "userProfile": {
+      "title": "userProfile",
+      "description": "Durable user profile and statistical data",
+      "type": "object",
+      "properties": {
+        "coins": { "type": "number", "description": "Coins balance" },
+        "lives": { "type": "number", "description": "Lives remaining" },
+        "currentStage": { "type": "number", "description": "Current stage of the game" },
+        "highScore": { "type": "number", "description": "Game highscore" },
+        "unlockedSkins": { "type": "array", "description": "List of unlocked skins IDs" },
+        "unlockedAccessories": { "type": "array", "description": "List of unlocked accessory IDs" },
+        "unlockedAuras": { "type": "array", "description": "List of unlocked aura IDs" },
+        "avatar": { "type": "object", "description": "Configured avatar properties" },
+        "realBalance": { "type": "number", "description": "Real purchase balance" },
+        "withdrawLimit": { "type": "number", "description": "Spend limit" },
+        "points": { "type": "number", "description": "XP Points" },
+        "level": { "type": "number", "description": "XP Level" },
+        "isVip": { "type": "boolean", "description": "VIP status flag" },
+        "rtpBoostSpins": { "type": "number", "description": "RTP spins remaining" },
+        "updatedAt": { "type": "string", "description": "Server updatedAt field" }
+      },
+      "required": ["coins", "lives", "currentStage", "highScore", "realBalance"]
+    },
+    "movieItem": {
+      "title": "movieItem",
+      "description": "Community uploaded movie metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Movie ID" },
+        "title": { "type": "string", "description": "Movie Title" },
+        "description": { "type": "string", "description": "Movie Description" },
+        "category": { "type": "string", "description": "Category of film" },
+        "year": { "type": "number", "description": "Year of release" },
+        "rating": { "type": "string", "description": "Age rating" },
+        "duration": { "type": "string", "description": "Duration length text" },
+        "matchScore": { "type": "number", "description": "Match score percentage" },
+        "imageUrl": { "type": "string", "description": "Banner cover image" },
+        "youtubeId": { "type": "string", "description": "YouTube Video ID" },
+        "tags": { "type": "array", "description": "List of tags" },
+        "uploaderId": { "type": "string", "description": "Uploader user UID" },
+        "uploaderName": { "type": "string", "description": "Uploader user name" },
+        "createdAt": { "type": "string", "description": "Date of creation" }
+      },
+      "required": ["id", "title", "description", "category", "year", "rating", "duration", "imageUrl"]
+    },
+    "transactionLog": {
+      "title": "transactionLog",
+      "description": "Logs of transactions and game play results",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Log ID" },
+        "userId": { "type": "string", "description": "Related user UID" },
+        "timestamp": { "type": "string", "description": "Formatted timestamp text" },
+        "type": { "type": "string", "description": "Earn or purchase type" },
+        "description": { "type": "string", "description": "Detailed summary" },
+        "amount": { "type": "number", "description": "Transaction amount" },
+        "currency": { "type": "string", "description": "Coins or Real" },
+        "status": { "type": "string", "description": "Status code" },
+        "securityHash": { "type": "string", "description": "Simulated security hash" }
+      },
+      "required": ["id", "userId", "timestamp", "type", "description", "amount", "currency", "status"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "userProfile",
+      "description": "Core profile of our users with statistics and coins"
+    },
+    "movies/{movieId}": {
+      "schema": "movieItem",
+      "description": "Movies shared by users"
+    },
+    "users/{userId}/logs/{logId}": {
+      "schema": "transactionLog",
+      "description": "Nested logs collection per user"
+    }
+  }
+}

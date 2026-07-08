@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Arena Arcade - Processando Autenticação...</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-white font-sans flex flex-col min-h-screen items-center justify-center p-6 select-none">
+  <div class="max-w-sm w-full bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-2xl text-center space-y-4 relative overflow-hidden">
+    <!-- Top accent bar -->
+    <div class="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-600"></div>
+    
+    <!-- Spinner animation -->
+    <div class="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mx-auto"></div>
+    
+    <h2 class="text-md font-black uppercase tracking-wider text-slate-100">Processando Login...</h2>
+    <p class="text-xs text-slate-400 leading-relaxed">
+      Aguarde um instante enquanto autenticamos sua sessão com segurança na plataforma Arena Arcade.
+    </p>
+  </div>
+
+  <script>
+    // Extract query parameters or hash parameters
+    const getParams = () => {
+      const params = {};
+      const search = window.location.search;
+      const hash = window.location.hash;
+
+      if (search) {
+        const urlParams = new URLSearchParams(search);
+        for (const [key, val] of urlParams.entries()) {
+          params[key] = val;
+        }
+      }
+      
+      if (hash) {
+        const hashParams = new URLSearchParams(hash.substring(1));
+        for (const [key, val] of hashParams.entries()) {
+          params[key] = val;
+        }
+      }
+      
+      return params;
+    };
+
+    const runCallback = () => {
+      const data = getParams();
+      
+      // Determine what authentication provider returned this callback
+      const state = data.state || '';
+      const code = data.code || '';
+      const accessToken = data.access_token || '';
+      const error = data.error || data.error_description || '';
+
+      if (window.opener) {
+        // Post message to the main application window
+        window.opener.postMessage({
+          type: 'ARENA_ARCADE_OAUTH_SUCCESS',
+          state,
+          code,
+          accessToken,
+          error
+        }, '*');
+        
+        // Close the popup window
+        setTimeout(() => {
+          window.close();
+        }, 800);
+      } else {
+        document.body.innerHTML = `
+          <div class="max-w-sm w-full bg-slate-900 border border-red-500/30 p-6 rounded-2xl shadow-2xl text-center space-y-3">
+            <span class="text-3xl">⚠️</span>
+            <h2 class="text-md font-bold text-red-400">Janela Mãe não Detectada</h2>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Não foi possível enviar os dados de autenticação pois a janela principal foi fechada ou não responde.
+            </p>
+            <button onclick="window.close()" class="w-full py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/20 text-xs font-bold rounded-xl transition-all">
+              Fechar Janela
+            </button>
+          </div>
+        `;
+      }
+    };
+
+    // Run callback processing
+    runCallback();
+  </script>
+</body>
+</html>
