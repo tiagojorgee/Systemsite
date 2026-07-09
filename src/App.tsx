@@ -20,6 +20,7 @@ const TransactionLogs = lazy(() => import('./components/TransactionLogs').then(m
 const FootballBets = lazy(() => import('./components/FootballBets').then(m => ({ default: m.FootballBets })));
 const Cinema = lazy(() => import('./components/Cinema').then(m => ({ default: m.Cinema })));
 const GamezoneShop = lazy(() => import('./components/GamezoneShop').then(m => ({ default: m.GamezoneShop })));
+const Feed = lazy(() => import('./components/Feed').then(m => ({ default: m.Feed })));
 
 interface TabLoaderProps {
   tabName: string;
@@ -34,6 +35,7 @@ const TabLoader = ({ tabName }: TabLoaderProps) => {
     football: 'Portal de Palpites Futebol',
     cinema: 'Cine Lounge & Vídeos',
     gamezoneshop: 'GamezoneShop E-commerce',
+    feed: 'Feed da Arena de Jogadores',
   };
 
   return (
@@ -62,8 +64,8 @@ const TabLoader = ({ tabName }: TabLoaderProps) => {
 };
 
 export default function App() {
-  // Tabs: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop'
-  const [activeTab, setActiveTab] = useState<'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop'>('games');
+  // Tabs: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed'
+  const [activeTab, setActiveTab] = useState<'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed'>('feed');
 
   // User Authentication States
   const [loggedInUser, setLoggedInUser] = useState<AppUser | null>(() => {
@@ -626,6 +628,13 @@ export default function App() {
               onOpenLogin={() => setShowAuthModal(true)}
               realBalance={realBalance}
               setRealBalance={setRealBalance}
+            />
+          )}
+
+          {activeTab === 'feed' && (
+            <Feed
+              loggedInUser={loggedInUser}
+              onOpenLogin={() => setShowAuthModal(true)}
             />
           )}
         </Suspense>

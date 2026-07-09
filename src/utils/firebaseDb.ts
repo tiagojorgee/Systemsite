@@ -136,35 +136,26 @@ const INITIAL_MOVIES_MOCK: FirestoreMovie[] = [
 export async function getUserProfile(userId: string): Promise<{ stats: PlayerStats; realBalance: number; withdrawLimit: number } | null> {
   const path = `users/${userId}`;
   
-  if (isRealFirebaseEnabled && dbInstance) {
-    try {
-      const firebaseFirestore = require('firebase/firestore');
-      const docRef = firebaseFirestore.doc(dbInstance, 'users', userId);
-      const snap = await firebaseFirestore.getDoc(docRef);
-      if (snap.exists()) {
-        const data = snap.data();
+  try {
+    const response = await fetch(`/api/user/profile?userId=${encodeURIComponent(userId)}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.profile) {
+        const profile = data.profile;
+        // Also update local storage cache for offline resilience
+        secureStorage.setItem(`gamezone_player_stats_${userId}`, profile.stats, userId);
+        secureStorage.setItem(`gamezone_real_balance_${userId}`, profile.realBalance, userId);
+        secureStorage.setItem(`gamezone_withdraw_limit_${userId}`, profile.withdrawLimit, userId);
+        
         return {
-          stats: {
-            coins: data.coins ?? 150,
-            lives: data.lives ?? 3,
-            currentStage: data.currentStage ?? 1,
-            highScore: data.highScore ?? 0,
-            unlockedSkins: data.unlockedSkins ?? ['classic'],
-            unlockedAccessories: data.unlockedAccessories ?? ['none'],
-            unlockedAuras: data.unlockedAuras ?? ['none'],
-            avatar: data.avatar ?? { skin: 'classic', accessory: 'none', aura: 'none' },
-            points: data.points ?? 0,
-            level: data.level ?? 1,
-            isVip: data.isVip ?? false,
-            rtpBoostSpins: data.rtpBoostSpins ?? 0
-          },
-          realBalance: data.realBalance ?? 120.00,
-          withdrawLimit: data.withdrawLimit ?? 100.00
+          stats: profile.stats,
+          realBalance: profile.realBalance,
+          withdrawLimit: profile.withdrawLimit
         };
       }
-    } catch (err) {
-      handleFirestoreError(err, OperationType.GET, path);
     }
+  } catch (err) {
+    console.warn('[SERVER DB] Failed to fetch profile from server, using local fallback:', err);
   }
 
   // Standalone offline-safe loading using secure signatures
@@ -206,31 +197,21 @@ export async function saveUserProfile(
   secureStorage.setItem(`gamezone_real_balance_${userId}`, realBalance, userId);
   secureStorage.setItem(`gamezone_withdraw_limit_${userId}`, withdrawLimit, userId);
 
-  if (isRealFirebaseEnabled && dbInstance) {
-    try {
-      const firebaseFirestore = require('firebase/firestore');
-      const docRef = firebaseFirestore.doc(dbInstance, 'users', userId);
-      await firebaseFirestore.setDoc(docRef, {
-        coins: stats.coins,
-        lives: stats.lives,
-        currentStage: stats.currentStage,
-        highScore: stats.highScore,
-        unlockedSkins: stats.unlockedSkins || ['classic'],
-        unlockedAccessories: stats.unlockedAccessories || ['none'],
-        unlockedAuras: stats.unlockedAuras || ['none'],
-        avatar: stats.avatar || { skin: 'classic', accessory: 'none', aura: 'none' },
-        points: stats.points ?? 0,
-        level: stats.level ?? 1,
-        isVip: stats.isVip ?? false,
-        rtpBoostSpins: stats.rtpBoostSpins ?? 0,
-        realBalance: realBalance,
-        withdrawLimit: withdrawLimit,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-      return;
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
-    }
+  try {
+    await fetch('/api/user/profile', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        userId,
+        stats,
+        realBalance,
+        withdrawLimit
+      })
+    });
+  } catch (err) {
+    console.warn('[SERVER DB] Failed to save profile to server:', err);
   }
 }
 
@@ -308,19 +289,18 @@ export async function addMovie(movie: FirestoreMovie): Promise<void> {
 export async function getUserLogs(userId: string): Promise<TransactionLog[]> {
   const path = `users/${userId}/logs`;
 
-  if (isRealFirebaseEnabled && dbInstance) {
-    try {
-      const firebaseFirestore = require('firebase/firestore');
-      const colRef = firebaseFirestore.collection(dbInstance, 'users', userId, 'logs');
-      const snap = await firebaseFirestore.getDocs(colRef);
-      const logs: TransactionLog[] = [];
-      snap.forEach((docSnap: any) => {
-        logs.push(docSnap.data() as TransactionLog);
-      });
-      return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, path);
+  try {
+    const response = await fetch(`/api/user/logs?userId=${encodeURIComponent(userId)}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.logs) {
+        // Update local cache
+        secureStorage.setItem(`gamezone_transaction_logs_${userId}`, data.logs, userId);
+        return data.logs;
+      }
     }
+  } catch (err) {
+    console.warn('[SERVER DB] Failed to fetch transaction logs from server, using local fallback:', err);
   }
 
   // Standalone simulated logs loader
@@ -348,14 +328,18 @@ export async function addUserLog(userId: string, log: TransactionLog): Promise<v
   const updatedLogs = [log, ...currentLogs.filter(l => l.id !== log.id)];
   secureStorage.setItem(`gamezone_transaction_logs_${userId}`, updatedLogs, userId);
 
-  if (isRealFirebaseEnabled && dbInstance) {
-    try {
-      const firebaseFirestore = require('firebase/firestore');
-      const docRef = firebaseFirestore.doc(dbInstance, 'users', userId, 'logs', log.id);
-      await firebaseFirestore.setDoc(docRef, log);
-      return;
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
-    }
+  try {
+    await fetch('/api/user/log', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        userId,
+        log
+      })
+    });
+  } catch (err) {
+    console.warn('[SERVER DB] Failed to save transaction log to server:', err);
   }
 }

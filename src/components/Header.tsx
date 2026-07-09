@@ -19,7 +19,8 @@ import {
   Chrome,
   Facebook,
   Video,
-  Database
+  Database,
+  MessageSquare
 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 import { getLevelForPoints } from '../utils/levelManager';
@@ -27,14 +28,14 @@ import { AppUser } from './AuthModal';
 
 interface HeaderProps {
   stats: PlayerStats;
-  activeTab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop';
-  setActiveTab: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop') => void;
+  activeTab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed';
+  setActiveTab: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed') => void;
   openCheckoutForQuickBuy: (itemId: string) => void;
   realBalance?: number;
   loggedInUser: AppUser | null;
   onLogout: () => void;
   onOpenAuthModal: () => void;
-  onPrefetchTab?: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop') => void;
+  onPrefetchTab?: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -50,7 +51,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [showUserDropdown, setShowUserDropdown] = useState(false);
 
-  const handleTabClick = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop') => {
+  const handleTabClick = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed') => {
     setActiveTab(tab);
     playSound.click();
   };
@@ -375,6 +376,20 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Tabs Menu */}
       <div className="max-w-7xl mx-auto mt-2 pt-2 border-t border-slate-100 flex items-center justify-start gap-1.5 overflow-x-auto scrollbar-none -mx-3 px-3 md:mx-0 md:px-0 flex-nowrap w-auto max-w-full">
+        <button
+          onClick={() => handleTabClick('feed')}
+          onMouseEnter={() => onPrefetchTab?.('feed')}
+          onTouchStart={() => onPrefetchTab?.('feed')}
+          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'feed'
+              ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white border border-indigo-500/30 shadow-lg shadow-indigo-600/15 scale-[1.02]'
+              : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-100/50 border border-transparent'
+          }`}
+          id="tab-feed"
+        >
+          <MessageSquare className="w-3.5 h-3.5 text-indigo-500 active-tab:text-white" />
+          Feed da Arena 💬
+        </button>
         <button
           onClick={() => handleTabClick('games')}
           onMouseEnter={() => onPrefetchTab?.('games')}
