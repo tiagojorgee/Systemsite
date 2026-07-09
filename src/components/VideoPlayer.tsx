@@ -55,6 +55,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose }) => {
   const [showControls, setShowControls] = useState<boolean>(true);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Dynamic system notifications within player HUD
+  const [notification, setNotification] = useState<{ message: string; type: 'info' | 'warning' | 'error' } | null>(null);
+
+  // YouTube API Integration states/refs
+  const ytPlayerRef = useRef<any>(null);
+  const [isYtReady, setIsYtReady] = useState<boolean>(false);
+
   // Monitor mouse movement to auto-hide controls in fullscreen or video view
   const handleMouseMove = () => {
     setShowControls(true);
@@ -76,31 +83,225 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose }) => {
     };
   }, [isPlaying]);
 
+  // Load and initialize the YouTube API Player safely
+  useEffect(() => {
+    if (playerMode !== 'youtube') {
+      setIsYtReady(false);
+      ytPlayerRef.current = null;
+      return;
+    }
+
+    let player: any = null;
+    let isDestroyed = false;
+    let isInitializing = false;
+
+    const initPlayer = () => {
+      if (isDestroyed || isInitializing || ytPlayerRef.current) return;
+      const win = window as any;
+      const targetId = `youtube-player-${media.id}`;
+      
+      // Double check if element exists in DOM first
+      if (!document.getElementById(targetId)) {
+        return;
+      }
+
+      if (win.YT && win.YT.Player) {
+        isInitializing = true;
+        try {
+          player = new win.YT.Player(targetId, {
+            height: '100%',
+            width: '100%',
+            videoId: media.youtubeId || 'dQw4w9WgXcQ',
+            playerVars: {
+              autoplay: isPlaying ? 1 : 0,
+              controls: 0, // hide native controls to use premium HUD
+              modestbranding: 1,
+              rel: 0,
+              showinfo: 0,
+              iv_load_policy: 3,
+              disablekb: 0,
+              fs: 0,
+            },
+            events: {
+              onReady: (event: any) => {
+                if (isDestroyed) return;
+                ytPlayerRef.current = event.target;
+                setIsYtReady(true);
+                
+                // Read current total duration
+                const dur = event.target.getDuration();
+                if (dur) setDuration(dur);
+                
+                // Initial volume and mute synchronization
+                event.target.setVolume(isMuted ? 0 : volume * 100);
+                if (isMuted) {
+                  event.target.mute();
+                } else {
+                  event.target.unMute();
+                }
+
+                if (isPlaying) {
+                  event.target.playVideo();
+                } else {
+                  event.target.pauseVideo();
+                }
+              },
+              onStateChange: (event: any) => {
+                if (isDestroyed) return;
+                // YT.PlayerState.PLAYING is 1, PAUSED is 2, ENDED is 0, BUFFERING is 3
+                const state = event.data;
+                if (state === 1) {
+                  setIsPlaying(true);
+                } else if (state === 2) {
+                  setIsPlaying(false);
+                } else if (state === 0) {
+                  setIsPlaying(false);
+                }
+              },
+              onError: (event: any) => {
+                console.error("YouTube Iframe Player API error:", event.data);
+                if (isDestroyed) return;
+                
+                // Provide a friendly self-healing notification
+                setNotification({
+                  message: "Vídeo indisponível ou com restrição de incorporação no YouTube. Iniciando servidor de backup...",
+                  type: 'warning'
+                });
+
+                // Failover to HTML5 player mode with a slight delay for transition
+                setTimeout(() => {
+                  if (!isDestroyed) {
+                    setPlayerMode('html5');
+                    setIsPlaying(true);
+                    setNotification(null);
+                  }
+                }, 2000);
+              }
+            }
+          });
+        } catch (err) {
+          console.warn("Failed to construct YT.Player:", err);
+          isInitializing = false;
+        }
+      }
+    };
+
+    const win = window as any;
+    if (!win.YT) {
+      // Inject YouTube API Script
+      const existingScript = document.getElementById('youtube-iframe-api-script');
+      if (!existingScript) {
+        const tag = document.createElement('script');
+        tag.id = 'youtube-iframe-api-script';
+        tag.src = 'https://www.youtube.com/iframe_api';
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        if (firstScriptTag && firstScriptTag.parentNode) {
+          firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+        } else {
+          document.head.appendChild(tag);
+        }
+      }
+
+      // Check periodically for YT availability
+      const prevCallback = win.onYouTubeIframeAPIReady;
+      win.onYouTubeIframeAPIReady = () => {
+        if (typeof prevCallback === 'function') {
+          try { prevCallback(); } catch (e) {}
+        }
+        initPlayer();
+      };
+    } else {
+      initPlayer();
+    }
+
+    // Polling backup to catch cases where onYouTubeIframeAPIReady has already fired
+    const interval = setInterval(() => {
+      if (win.YT && win.YT.Player && !ytPlayerRef.current) {
+        initPlayer();
+        clearInterval(interval);
+      }
+    }, 300);
+
+    return () => {
+      isDestroyed = true;
+      clearInterval(interval);
+      if (player && typeof player.destroy === 'function') {
+        try {
+          player.destroy();
+        } catch (e) {
+          console.warn("Error destroying YT player:", e);
+        }
+      }
+      ytPlayerRef.current = null;
+      setIsYtReady(false);
+    };
+  }, [playerMode, media.youtubeId]);
+
+  // Poll YouTube video current playback position to update our custom progress bar
+  useEffect(() => {
+    if (playerMode !== 'youtube' || !isPlaying || !isYtReady) return;
+
+    const interval = setInterval(() => {
+      if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
+        setCurrentTime(ytPlayerRef.current.getCurrentTime());
+        const dur = ytPlayerRef.current.getDuration();
+        if (dur) setDuration(dur);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [playerMode, isPlaying, isYtReady]);
+
+  // Dynamically synchronize volume and mute changes with YouTube API Player
+  useEffect(() => {
+    if (playerMode === 'youtube' && ytPlayerRef.current) {
+      if (typeof ytPlayerRef.current.setVolume === 'function') {
+        ytPlayerRef.current.setVolume(isMuted ? 0 : volume * 100);
+      }
+      if (typeof ytPlayerRef.current.mute === 'function') {
+        if (isMuted) {
+          ytPlayerRef.current.mute();
+        } else {
+          ytPlayerRef.current.unMute();
+        }
+      }
+    }
+  }, [volume, isMuted, playerMode]);
+
   // Handle Play / Pause
   const togglePlay = () => {
     playSound.click();
     if (playerMode === 'html5' && videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
+        setIsPlaying(false);
       } else {
         videoRef.current.play().catch(err => console.error(err));
+        setIsPlaying(true);
       }
+    } else if (playerMode === 'youtube' && ytPlayerRef.current) {
+      if (isPlaying) {
+        ytPlayerRef.current.pauseVideo();
+        setIsPlaying(false);
+      } else {
+        ytPlayerRef.current.playVideo();
+        setIsPlaying(true);
+      }
+    } else {
+      setIsPlaying(!isPlaying);
     }
-    setIsPlaying(!isPlaying);
   };
 
   // Handle volume change
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
     setVolume(val);
-    if (val === 0) {
-      setIsMuted(true);
-    } else {
-      setIsMuted(false);
-    }
+    const nextMuted = val === 0;
+    setIsMuted(nextMuted);
+
     if (videoRef.current) {
       videoRef.current.volume = val;
-      videoRef.current.muted = val === 0;
+      videoRef.current.muted = nextMuted;
     }
   };
 
@@ -137,6 +338,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose }) => {
         if (isPlaying) {
           videoRef.current.play().catch(err => console.error(err));
         }
+      } else if (playerMode === 'youtube' && ytPlayerRef.current && typeof ytPlayerRef.current.setPlaybackQuality === 'function') {
+        const ytQuality = 
+          selectedQuality === '1080p' ? 'hd1080' : 
+          selectedQuality === '720p' ? 'hd720' : 
+          selectedQuality === '480p' ? 'large' : 
+          selectedQuality === '360p' ? 'medium' : 'default';
+        ytPlayerRef.current.setPlaybackQuality(ytQuality);
       }
     }, 1200);
   };
@@ -160,6 +368,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose }) => {
     setCurrentTime(newTime);
     if (playerMode === 'html5' && videoRef.current) {
       videoRef.current.currentTime = newTime;
+    } else if (playerMode === 'youtube' && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
+      ytPlayerRef.current.seekTo(newTime, true);
     }
   };
 
@@ -208,12 +418,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose }) => {
       className="relative aspect-[16/9] w-full bg-black rounded-xl overflow-hidden group border border-zinc-850 shadow-2xl select-none"
       id={`video-player-${media.id}`}
     >
-      {/* 1. MAIN RENDER AREA (HTML5 Native Video or YouTube Iframe) */}
+      {/* Floating System Notifications Overlay */}
+      {notification && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-black/95 backdrop-blur-md px-4 py-2.5 rounded-xl border border-amber-500/30 flex items-center gap-2.5 text-xs text-amber-200 shadow-2xl animate-bounce max-w-[90%] text-center">
+          <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 animate-pulse" />
+          <span className="font-sans font-bold leading-relaxed">{notification.message}</span>
+        </div>
+      )}
+
+      {/* 1. MAIN RENDER AREA (HTML5 Native Video or YouTube Iframe via API) */}
       <div className="w-full h-full relative">
-        {playerMode === 'html5' && media.videoUrl ? (
+        {playerMode === 'html5' ? (
           <video
             ref={videoRef}
-            src={media.videoUrl}
+            src={media.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'}
             autoPlay
             playsInline
             muted={isMuted}
@@ -221,8 +439,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose }) => {
             onLoadedMetadata={handleLoadedMetadata}
             onEnded={() => setIsPlaying(false)}
             onClick={togglePlay}
-            onError={(e) => {
-              console.warn("Video failed to load, falling back to YouTube or standard placeholder:", e);
+            onError={() => {
+              console.warn("Video failed to load, falling back to YouTube or standard placeholder.");
               if (media.youtubeId) {
                 setPlayerMode('youtube');
               } else {
@@ -243,21 +461,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose }) => {
             }`}
           />
         ) : (
-          // YouTube Iframe integration with custom overlay integration
-          <iframe 
-            width="100%" 
-            height="100%" 
-            src={`https://www.youtube.com/embed/${media.youtubeId || 'dQw4w9WgXcQ'}?autoplay=1&mute=${isMuted ? 1 : 0}&modestbranding=1&rel=0&controls=1&showinfo=0&vq=${
-              quality === '1080p' ? 'hd1080' : 
-              quality === '720p' ? 'hd720' : 
-              quality === '480p' ? 'large' : 'medium'
-            }`} 
-            title={media.title}
-            frameBorder="0" 
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-            allowFullScreen
-            className={`w-full h-full object-cover transition-all duration-300 ${isChangingQuality ? 'opacity-30 scale-95 blur-md' : 'opacity-100 scale-100'}`}
-          />
+          // YouTube API Container Integration
+          <div className="w-full h-full relative overflow-hidden bg-black flex items-center justify-center">
+            <div 
+              id={`youtube-player-${media.id}`}
+              className={`w-full h-full transition-all duration-300 ${isChangingQuality ? 'opacity-30 scale-95 blur-md' : 'opacity-100 scale-100'}`}
+            />
+          </div>
         )}
 
         {/* 2. QUALITY SWITCHING BUFFERING SPINNER OVERLAY */}
@@ -308,56 +518,54 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose }) => {
         </div>
       )}
 
-      {/* 4. CUSTOM PREMIUM CONTROL OVERLAY (For HTML5 and YouTube simulated integrations) */}
+      {/* 4. CUSTOM PREMIUM CONTROL OVERLAY (For HTML5 and YouTube integrations) */}
       <div 
         className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/85 to-transparent p-4 md:p-6 space-y-4 transition-all duration-500 z-30 ${
           showControls ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6 pointer-events-none'
         }`}
       >
-        {/* Progress Slider (Active timeline scrubber for native HTML5 mode) */}
-        {playerMode === 'html5' && (
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] font-mono font-bold text-zinc-400">
-              {formatTime(currentTime)}
-            </span>
-            <input 
-              type="range"
-              min={0}
-              max={duration}
-              value={currentTime}
-              onChange={handleTimelineChange}
-              className="flex-1 h-1.5 rounded-lg appearance-none cursor-pointer bg-zinc-800 accent-red-600 focus:outline-none"
-              style={{
-                background: `linear-gradient(to right, #E50914 0%, #E50914 ${
-                  (currentTime / duration) * 100
-                }%, #27272a ${(currentTime / duration) * 100}%, #27272a 100%)`
-              }}
-            />
-            <span className="text-[10px] font-mono font-bold text-zinc-300">
-              {formatTime(duration)}
-            </span>
-          </div>
-        )}
+        {/* Progress Slider (Active timeline scrubber for native HTML5 and YouTube mode) */}
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-mono font-bold text-zinc-400">
+            {formatTime(currentTime)}
+          </span>
+          <input 
+            type="range"
+            min={0}
+            max={duration}
+            value={currentTime}
+            onChange={handleTimelineChange}
+            disabled={playerMode === 'youtube' && !isYtReady}
+            className="flex-1 h-1.5 rounded-lg appearance-none cursor-pointer bg-zinc-800 accent-red-600 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              background: `linear-gradient(to right, #E50914 0%, #E50914 ${
+                (currentTime / duration) * 100
+              }%, #27272a ${(currentTime / duration) * 100}%, #27272a 100%)`
+            }}
+          />
+          <span className="text-[10px] font-mono font-bold text-zinc-300">
+            {formatTime(duration)}
+          </span>
+        </div>
 
         {/* Dynamic Control Buttons Row */}
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             {/* Play/Pause Button */}
-            {playerMode === 'html5' && (
-              <button 
-                onClick={togglePlay}
-                className="w-10 h-10 rounded-full bg-white hover:bg-neutral-200 text-black flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer"
-                title={isPlaying ? 'Pausar' : 'Reproduzir'}
-              >
-                {isPlaying ? <Pause className="w-4 h-4 fill-black text-black" /> : <Play className="w-4 h-4 fill-black text-black translate-x-0.5" />}
-              </button>
-            )}
+            <button 
+              onClick={togglePlay}
+              disabled={playerMode === 'youtube' && !isYtReady}
+              className="w-10 h-10 rounded-full bg-white hover:bg-neutral-200 text-black flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title={isPlaying ? 'Pausar' : 'Reproduzir'}
+            >
+              {isPlaying ? <Pause className="w-4 h-4 fill-black text-black" /> : <Play className="w-4 h-4 fill-black text-black translate-x-0.5" />}
+            </button>
 
             {/* Indicator of YouTube Live Player Controls */}
             {playerMode === 'youtube' && (
               <div className="flex items-center gap-1.5 bg-red-600/95 text-white font-extrabold text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-lg shadow-md animate-pulse">
                 <Youtube className="w-3.5 h-3.5 fill-white" />
-                <span>YouTube Player</span>
+                <span>{isYtReady ? 'YouTube Online' : 'Conectando YT...'}</span>
               </div>
             )}
 
