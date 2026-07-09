@@ -103,7 +103,7 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS perfis (
-    usuario_id TEXT PRIMARY KEY REFERENCES usuarios(id),
+    usuario_id TEXT PRIMARY KEY,
     nome TEXT NOT NULL,
     avatar TEXT,
     stats TEXT,
@@ -327,6 +327,12 @@ export const serverDb = {
 
   // Save user profile
   saveProfile: (userId: string, profile: UserProfile): void => {
+    // Ensure parent user row exists as a failsafe
+    db.prepare(`
+      INSERT OR IGNORE INTO usuarios (id, email, senha_criptografada)
+      VALUES (?, ?, NULL)
+    `).run(userId, userId.includes('@') ? userId : `${userId}@local.gamezone.com`);
+
     db.prepare(`
       INSERT INTO perfis (usuario_id, nome, avatar, stats, real_balance, withdraw_limit)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -336,7 +342,7 @@ export const serverDb = {
         withdraw_limit=excluded.withdraw_limit
     `).run(
       userId,
-      profile.userId, // use profile ID as placeholder for name
+      userId.includes('@') ? userId.split('@')[0] : userId,
       null,
       JSON.stringify(profile.stats),
       profile.realBalance,
