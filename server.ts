@@ -1,60 +1,67 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
-import { createClient } from "@supabase/supabase-js";
+import multer from "multer";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
 import { serverDb } from "./serverDb";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Supabase client lazy getter
-function getSupabaseClient() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_KEY;
-  if (!url || !key) {
-    return null;
-  }
-  return createClient(url, key);
+const JWT_SECRET = process.env.JWT_SECRET || "gamezone_jwt_secret_token_123!";
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Supabase Storage file upload helper
-async function uploadToSupabaseStorage(supabase: any, base64Data: string, fileName: string): Promise<string | null> {
+// Multer storage configuration for local file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    const fileExt = path.extname(file.originalname) || ".png";
+    const uniqueName = `feed-${Date.now()}-${Math.round(Math.random() * 1e9)}${fileExt}`;
+    cb(null, uniqueName);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 } // Limit to 50MB
+});
+
+// Helper to save base64 data to local file in uploads folder
+function saveBase64ToUploads(base64Data: string, fileName: string): string | null {
   try {
     const matches = base64Data.match(/^data:(.+);base64,(.+)$/);
     let buffer: Buffer;
-    let contentType = 'application/octet-stream';
-    
+    let extension = ".png";
+
     if (matches && matches.length === 3) {
-      contentType = matches[1];
-      buffer = Buffer.from(matches[2], 'base64');
+      const mime = matches[1];
+      buffer = Buffer.from(matches[2], "base64");
+      const parts = mime.split("/");
+      if (parts.length === 2) {
+        extension = "." + parts[1];
+      }
     } else {
-      buffer = Buffer.from(base64Data, 'base64');
+      buffer = Buffer.from(base64Data, "base64");
+      const detectedExt = path.extname(fileName);
+      if (detectedExt) extension = detectedExt;
     }
 
-    const fileExt = fileName.split('.').pop() || 'bin';
-    const uniqueFileName = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
-    const filepath = `uploads/${uniqueFileName}`;
-
-    const { data, error } = await supabase.storage
-      .from('arquivos-usuarios')
-      .upload(filepath, buffer, {
-        contentType,
-        upsert: true
-      });
-
-    if (error) {
-      console.error("[SUPABASE STORAGE ERROR] Failed to upload. Trying to get fallback or auto-recovering:", error);
-      return null;
-    }
-
-    const { data: publicUrlData } = supabase.storage
-      .from('arquivos-usuarios')
-      .getPublicUrl(filepath);
-
-    return publicUrlData.publicUrl;
+    const uniqueName = `upload-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
+    const filePath = path.join(process.cwd(), "uploads", uniqueName);
+    fs.writeFileSync(filePath, buffer);
+    return `/uploads/${uniqueName}`;
   } catch (err) {
-    console.error("[SUPABASE STORAGE EXCEPTION]", err);
+    console.error("[LOCAL UPLOAD ERROR] Failed to save base64:", err);
     return null;
   }
 }
@@ -63,9 +70,12 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT || 3000);
 
+  // Serve uploads folder as static
+  app.use("/uploads", express.static(uploadsDir));
+
   // JSON and URL-encoded body parsers with generous limits for file uploads
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // API health route
   app.get("/api/health", (req, res) => {
@@ -74,54 +84,130 @@ async function startServer() {
 
   // --- AUTH ENDPOINTS ---
 
+  // GET /api/auth/me - Verify current session token
+  app.get("/api/auth/me", (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Sessão expirada ou não autenticada." });
+    }
+
+    const token = authHeader.split(" ")[1];
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      const user = serverDb.getUser(decoded.userId);
+      if (!user) {
+        return res.status(401).json({ error: "Usuário não encontrado." });
+      }
+
+      return res.json({
+        user: {
+          email: user.email,
+          name: user.name,
+          provider: "email",
+          uid: user.uid,
+          avatarUrl: user.avatarUrl
+        }
+      });
+    } catch (err) {
+      return res.status(401).json({ error: "Sessão inválida ou expirada." });
+    }
+  });
+
   // POST /api/auth/register
-  app.post("/api/auth/register", (req, res) => {
+  app.post("/api/auth/register", async (req, res) => {
     const { email, password, name } = req.body;
     if (!email || !password || !name) {
       return res.status(400).json({ error: "E-mail, senha e nome são obrigatórios." });
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const userId = 'user_' + cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, '_');
+    const userId = "user_" + cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, "_");
 
-    const existingUser = serverDb.getUser(userId);
-    if (existingUser) {
-      return res.status(400).json({ error: "Este e-mail já está cadastrado no sistema." });
+    try {
+      const existingUser = serverDb.getUser(userId);
+      if (existingUser) {
+        return res.status(400).json({ error: "Este e-mail já está cadastrado no sistema." });
+      }
+
+      // Cryptography of Password via bcrypt
+      const saltRounds = 10;
+      const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+      const newUser = {
+        email: cleanEmail,
+        password: hashedPassword,
+        name,
+        provider: "email" as const,
+        uid: userId,
+        avatarUrl: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`
+      };
+
+      serverDb.saveUser(userId, newUser);
+      console.log(`[AUTH] User registered successfully in SQLite: ${cleanEmail}`);
+
+      // Sign JWT
+      const token = jwt.sign({ userId, email: cleanEmail, name }, JWT_SECRET, { expiresIn: "7d" });
+
+      return res.json({
+        token,
+        user: {
+          email: newUser.email,
+          name: newUser.name,
+          provider: newUser.provider,
+          uid: newUser.uid,
+          avatarUrl: newUser.avatarUrl
+        }
+      });
+    } catch (err: any) {
+      console.error("[AUTH REGISTRATION ERROR]", err);
+      return res.status(500).json({ error: "Erro interno ao processar cadastro." });
     }
-
-    const newUser = {
-      email: cleanEmail,
-      password,
-      name,
-      provider: 'email' as const,
-      uid: userId
-    };
-
-    serverDb.saveUser(userId, newUser);
-    console.log(`[AUTH] User registered successfully: ${cleanEmail}`);
-    return res.json({ user: { email: newUser.email, name: newUser.name, provider: newUser.provider, uid: newUser.uid } });
   });
 
   // POST /api/auth/login
-  app.post("/api/auth/login", (req, res) => {
+  app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: "E-mail e senha são obrigatórios." });
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const userId = 'user_' + cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, '_');
+    const userId = "user_" + cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, "_");
 
-    const user = serverDb.getUser(userId);
-    if (!user || user.password !== password) {
-      return res.status(400).json({ error: "E-mail ou senha incorretos." });
+    try {
+      const user = serverDb.getUser(userId);
+      if (!user || !user.password) {
+        return res.status(400).json({ error: "E-mail ou senha incorretos." });
+      }
+
+      // Compare password
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return res.status(400).json({ error: "E-mail ou senha incorretos." });
+      }
+
+      console.log(`[AUTH] User logged in SQLite: ${cleanEmail}`);
+
+      // Sign JWT
+      const token = jwt.sign({ userId, email: cleanEmail, name: user.name }, JWT_SECRET, { expiresIn: "7d" });
+
+      return res.json({
+        token,
+        user: {
+          email: user.email,
+          name: user.name,
+          provider: user.provider,
+          uid: user.uid || userId,
+          avatarUrl: user.avatarUrl
+        }
+      });
+    } catch (err: any) {
+      console.error("[AUTH LOGIN ERROR]", err);
+      return res.status(500).json({ error: "Erro interno ao processar login." });
     }
-
-    console.log(`[AUTH] User logged in: ${cleanEmail}`);
-    return res.json({ user: { email: user.email, name: user.name, provider: user.provider, uid: user.uid || userId } });
   });
 
-  // POST /api/auth/google-login
+  // POST /api/auth/google-login (Allows compatible Google SSO using direct JWT fallback)
   app.post("/api/auth/google-login", (req, res) => {
     const { email, name, avatarUrl, uid } = req.body;
     if (!email) {
@@ -129,20 +215,37 @@ async function startServer() {
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const userId = uid || 'user_' + cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, '_');
+    const userId = uid || "user_" + cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, "_");
 
-    const existingUser = serverDb.getUser(userId);
-    const updatedUser = {
-      email: cleanEmail,
-      name: name || "Usuário Google",
-      avatarUrl,
-      provider: 'google' as const,
-      uid: userId
-    };
+    try {
+      const updatedUser = {
+        email: cleanEmail,
+        name: name || "Usuário Google",
+        avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name || "google")}`,
+        provider: "google" as const,
+        uid: userId
+      };
 
-    serverDb.saveUser(userId, updatedUser);
-    console.log(`[AUTH] Google user upserted: ${cleanEmail}`);
-    return res.json({ user: { email: updatedUser.email, name: updatedUser.name, provider: updatedUser.provider, uid: updatedUser.uid, avatarUrl: updatedUser.avatarUrl } });
+      serverDb.saveUser(userId, updatedUser);
+      console.log(`[AUTH] Google user upserted: ${cleanEmail}`);
+
+      // Sign JWT
+      const token = jwt.sign({ userId, email: cleanEmail, name: updatedUser.name }, JWT_SECRET, { expiresIn: "7d" });
+
+      return res.json({
+        token,
+        user: {
+          email: updatedUser.email,
+          name: updatedUser.name,
+          provider: updatedUser.provider,
+          uid: updatedUser.uid,
+          avatarUrl: updatedUser.avatarUrl
+        }
+      });
+    } catch (err: any) {
+      console.error("[AUTH GOOGLE LOGIN ERROR]", err);
+      return res.status(500).json({ error: "Erro interno no Google login." });
+    }
   });
 
   // --- PROFILE ENDPOINTS ---
@@ -165,10 +268,10 @@ async function startServer() {
       lives: 3,
       currentStage: 1,
       highScore: 0,
-      unlockedSkins: ['classic'],
-      unlockedAccessories: ['none'],
-      unlockedAuras: ['none'],
-      avatar: { skin: 'classic', accessory: 'none', aura: 'none' },
+      unlockedSkins: ["classic"],
+      unlockedAccessories: ["none"],
+      unlockedAuras: ["none"],
+      avatar: { skin: "classic", accessory: "none", aura: "none" },
       points: 0,
       level: 1
     };
@@ -177,8 +280,8 @@ async function startServer() {
       profile: {
         userId,
         stats: defaultStats,
-        realBalance: 120.00,
-        withdrawLimit: 100.00
+        realBalance: 120.0,
+        withdrawLimit: 100.0
       }
     });
   });
@@ -193,8 +296,8 @@ async function startServer() {
     serverDb.saveProfile(userId, {
       userId,
       stats,
-      realBalance: typeof realBalance === 'number' ? realBalance : 120.00,
-      withdrawLimit: typeof withdrawLimit === 'number' ? withdrawLimit : 100.00
+      realBalance: typeof realBalance === "number" ? realBalance : 120.0,
+      withdrawLimit: typeof withdrawLimit === "number" ? withdrawLimit : 100.0
     });
 
     return res.json({ success: true });
@@ -226,71 +329,60 @@ async function startServer() {
 
   // --- FEED API ROUTES ---
 
-  // GET /api/feed
+  // GET /api/feed - Fetch all posts in chronological (descending) order
   app.get("/api/feed", async (req, res) => {
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-      console.log("[FEED] Supabase not configured. Serving local persistent db posts.");
-      return res.json({ posts: serverDb.getPosts(), source: "server_db" });
-    }
-
     try {
-      const { data, error } = await supabase
-        .from("posts")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        console.warn("[FEED] Failed to fetch from Supabase 'posts' table. Serving from server_db fallback.");
-        return res.json({ posts: serverDb.getPosts(), source: "fallback_due_to_db_error" });
-      }
-
-      return res.json({ posts: data || [], source: "supabase" });
-    } catch (err) {
-      console.error("[FEED] Error querying Supabase:", err);
-      return res.json({ posts: serverDb.getPosts(), source: "error" });
+      const posts = serverDb.getPosts();
+      return res.json({ posts, source: "sqlite" });
+    } catch (err: any) {
+      console.error("[FEED FETCH ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar publicações do banco de dados." });
     }
   });
 
-  // POST /api/feed
-  app.post("/api/feed", async (req, res) => {
-    const { username, userAvatarUrl, text, mediaBase64, mediaFileName, mediaUrl, mediaType } = req.body;
+  // POST /api/feed - Create a post with local image upload handling
+  app.post("/api/feed", upload.single("media"), async (req, res) => {
+    const { username, userAvatarUrl, text, mediaBase64, mediaFileName, mediaUrl, mediaType, userId } = req.body;
 
     if (!username || !text) {
-      return res.status(400).json({ error: "Username e texto do post são obrigatórios" });
+      return res.status(400).json({ error: "Nome de usuário e texto são obrigatórios." });
     }
 
-    let media_url = mediaUrl || "";
-    const supabase = getSupabaseClient();
+    let finalMediaUrl = mediaUrl || "";
 
-    if (mediaBase64 && !media_url) {
-      if (supabase) {
-        const uploadedUrl = await uploadToSupabaseStorage(supabase, mediaBase64, mediaFileName || "upload.png");
-        if (uploadedUrl) {
-          media_url = uploadedUrl;
-        } else {
-          media_url = "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=600";
-        }
-      } else {
-        media_url = mediaBase64.length < 1000000 ? mediaBase64 : "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=600";
+    // 1. Process files uploaded directly via multipart form upload
+    if (req.file) {
+      finalMediaUrl = `/uploads/${req.file.filename}`;
+    }
+    // 2. Process base64 data fallback
+    else if (mediaBase64 && !finalMediaUrl) {
+      const savedLocalUrl = saveBase64ToUploads(mediaBase64, mediaFileName || "upload.png");
+      if (savedLocalUrl) {
+        finalMediaUrl = savedLocalUrl;
       }
     }
 
     const newPost = {
       id: `post-${Date.now()}`,
+      userId: userId || undefined,
       username,
       userAvatarUrl: userAvatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(username)}`,
       text,
-      media_url: media_url || undefined,
-      media_type: mediaType || 'image',
+      media_url: finalMediaUrl || undefined,
+      media_type: (mediaType as "image" | "video") || "image",
       created_at: new Date().toISOString(),
       likes: [],
       evaluations: {},
       comments: []
     };
 
-    serverDb.addPost(newPost);
-    return res.json({ post: newPost, source: "server_db" });
+    try {
+      serverDb.addPost(newPost);
+      return res.json({ post: newPost, source: "sqlite" });
+    } catch (err: any) {
+      console.error("[FEED POST CREATION ERROR]", err);
+      return res.status(500).json({ error: "Erro ao criar nova publicação no SQLite." });
+    }
   });
 
   // POST /api/feed/like
@@ -327,7 +419,7 @@ async function startServer() {
   // POST /api/feed/evaluate
   app.post("/api/feed/evaluate", (req, res) => {
     const { postId, userId, rating } = req.body;
-    if (!postId || !userId || typeof rating !== 'number') {
+    if (!postId || !userId || typeof rating !== "number") {
       return res.status(400).json({ error: "postId, userId and rating are required" });
     }
 
@@ -523,10 +615,10 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     console.log("[SERVER] Starting in production mode serving static assets...");
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 

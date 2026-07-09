@@ -90,6 +90,31 @@ export default function App() {
     }
   }, [loggedInUser]);
 
+  useEffect(() => {
+    const token = localStorage.getItem('gamezone_jwt_token');
+    if (token) {
+      fetch('/api/auth/me', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      .then(res => {
+        if (!res.ok) throw new Error('Sessão expirada');
+        return res.json();
+      })
+      .then(data => {
+        if (data && data.user) {
+          setLoggedInUser(data.user);
+        }
+      })
+      .catch(err => {
+        console.warn('[JWT Check]', err.message);
+        localStorage.removeItem('gamezone_jwt_token');
+        setLoggedInUser(null);
+      });
+    }
+  }, []);
+
   const handleLogout = async () => {
     playSound.click();
     if (loggedInUser?.provider === 'google') {
@@ -99,6 +124,7 @@ export default function App() {
         console.error('Error signing out Google:', e);
       }
     }
+    localStorage.removeItem('gamezone_jwt_token');
     setLoggedInUser(null);
     triggerToast('ℹ️ Sessão finalizada com sucesso.');
   };

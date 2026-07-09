@@ -81,6 +81,9 @@ export const Feed: React.FC<FeedProps> = ({ loggedInUser, onOpenLogin }) => {
   const [sourceInfo, setSourceInfo] = useState<string>('server_db');
 
   // New post form states
+  const [usernameInput, setUsernameInput] = useState<string>(() => {
+    return loggedInUser ? loggedInUser.name : '';
+  });
   const [text, setText] = useState<string>('');
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
@@ -88,6 +91,12 @@ export const Feed: React.FC<FeedProps> = ({ loggedInUser, onOpenLogin }) => {
   const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [showUrlInput, setShowUrlInput] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (loggedInUser) {
+      setUsernameInput(loggedInUser.name);
+    }
+  }, [loggedInUser]);
 
   // Status message
   const [statusMsg, setStatusMsg] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -183,15 +192,16 @@ export const Feed: React.FC<FeedProps> = ({ loggedInUser, onOpenLogin }) => {
   // Submit Post
   const handlePublish = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loggedInUser) {
-      showStatus("Você precisa estar logado para publicar no Feed.", "error");
-      onOpenLogin();
+    
+    const finalUsername = usernameInput.trim();
+    if (!finalUsername) {
+      showStatus("Por favor, insira um nome de usuário.", "error");
       return;
     }
 
     const finalText = text.trim();
     if (!finalText) {
-      showStatus("Por favor, digite uma legenda para sua publicação.", "error");
+      showStatus("Por favor, digite um texto para sua publicação.", "error");
       return;
     }
 
@@ -199,22 +209,31 @@ export const Feed: React.FC<FeedProps> = ({ loggedInUser, onOpenLogin }) => {
     playSound.click();
 
     try {
-      const payload = {
-        username: loggedInUser.name,
-        userAvatarUrl: loggedInUser.avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(loggedInUser.name)}`,
-        text: finalText,
-        mediaBase64: mediaPreview || undefined,
-        mediaFileName: mediaFile ? mediaFile.name : undefined,
-        mediaUrl: mediaUrlInput.trim() || undefined,
-        mediaType: mediaType
-      };
+      const formData = new FormData();
+      formData.append("username", finalUsername);
+      formData.append("userAvatarUrl", loggedInUser?.avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(finalUsername)}`);
+      formData.append("text", finalText);
+      
+      if (mediaFile) {
+        formData.append("media", mediaFile);
+        formData.append("mediaFileName", mediaFile.name);
+      } else if (mediaPreview) {
+        formData.append("mediaBase64", mediaPreview);
+      }
+
+      if (mediaUrlInput.trim()) {
+        formData.append("mediaUrl", mediaUrlInput.trim());
+      }
+
+      formData.append("mediaType", mediaType);
+
+      if (loggedInUser?.email) {
+        formData.append("userId", loggedInUser.email);
+      }
 
       const response = await fetch('/api/feed', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
+        body: formData
       });
 
       if (!response.ok) {
@@ -515,29 +534,45 @@ export const Feed: React.FC<FeedProps> = ({ loggedInUser, onOpenLogin }) => {
 
       {/* Instagram Post Creator Block */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3.5">
-        <div className="flex gap-3">
-          {loggedInUser ? (
-            <img 
-              src={loggedInUser.avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(loggedInUser.name)}`} 
-              alt={loggedInUser.name} 
-              className="w-10 h-10 rounded-full border border-slate-200 shadow-sm"
-              referrerPolicy="no-referrer"
+        <div className="space-y-3">
+          {/* Nome de Usuário input row */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all">
+            <User className="w-4 h-4 text-slate-400 shrink-0" />
+            <input
+              type="text"
+              value={usernameInput}
+              onChange={(e) => setUsernameInput(e.target.value.slice(0, 35))}
+              placeholder="Digite seu nome de usuário / apelido..."
+              className="w-full bg-transparent border-none outline-none text-xs md:text-sm font-semibold text-slate-800 placeholder-slate-400"
             />
-          ) : (
-            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-slate-200 to-slate-300 flex items-center justify-center text-slate-500">
-              <User className="w-5 h-5" />
+          </div>
+
+          <div className="flex gap-3">
+            {loggedInUser ? (
+              <img 
+                src={loggedInUser.avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(usernameInput || 'visitante')}`} 
+                alt={loggedInUser.name} 
+                className="w-10 h-10 rounded-full border border-slate-200 shadow-sm shrink-0 object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <img 
+                src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(usernameInput || 'visitante')}`} 
+                alt="Avatar" 
+                className="w-10 h-10 rounded-full border border-slate-200 shadow-sm shrink-0 object-cover"
+                referrerPolicy="no-referrer"
+              />
+            )}
+            
+            <div className="flex-1">
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value.slice(0, 500))}
+                placeholder="No que você está pensando? Digite o texto da sua publicação..."
+                rows={3}
+                className="w-full bg-transparent border-none outline-none text-xs md:text-sm text-slate-800 placeholder-slate-400 resize-none leading-relaxed pt-1.5 focus:ring-0 focus:outline-none"
+              />
             </div>
-          )}
-          
-          <div className="flex-1">
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value.slice(0, 500))}
-              placeholder={loggedInUser ? `No que você está pensando, ${loggedInUser.name.split(' ')[0]}?` : "Faça login para compartilhar fotos e vídeos..."}
-              disabled={!loggedInUser}
-              rows={2}
-              className="w-full bg-transparent border-none outline-none text-xs md:text-sm text-slate-800 placeholder-slate-400 resize-none leading-relaxed pt-1.5 focus:ring-0"
-            />
           </div>
         </div>
 
@@ -595,9 +630,8 @@ export const Feed: React.FC<FeedProps> = ({ loggedInUser, onOpenLogin }) => {
           <div className="flex items-center gap-1">
             <button
               type="button"
-              disabled={!loggedInUser}
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1 px-2.5 py-1.5 hover:bg-slate-50 text-slate-500 hover:text-indigo-600 rounded-lg transition-colors cursor-pointer text-[11px] font-bold disabled:opacity-50"
+              className="flex items-center gap-1 px-2.5 py-1.5 hover:bg-slate-50 text-slate-500 hover:text-indigo-600 rounded-lg transition-colors cursor-pointer text-[11px] font-bold"
             >
               <ImageIcon className="w-4 h-4 text-emerald-500" />
               <span className="hidden sm:inline">Foto/Vídeo</span>
@@ -612,12 +646,11 @@ export const Feed: React.FC<FeedProps> = ({ loggedInUser, onOpenLogin }) => {
 
             <button
               type="button"
-              disabled={!loggedInUser}
               onClick={() => {
                 setShowUrlInput(!showUrlInput);
                 playSound.click();
               }}
-              className="flex items-center gap-1 px-2.5 py-1.5 hover:bg-slate-50 text-slate-500 hover:text-indigo-600 rounded-lg transition-colors cursor-pointer text-[11px] font-bold disabled:opacity-50"
+              className="flex items-center gap-1 px-2.5 py-1.5 hover:bg-slate-50 text-slate-500 hover:text-indigo-600 rounded-lg transition-colors cursor-pointer text-[11px] font-bold"
             >
               <Link className="w-4 h-4 text-sky-500" />
               <span className="hidden sm:inline">URL Web</span>
@@ -626,7 +659,7 @@ export const Feed: React.FC<FeedProps> = ({ loggedInUser, onOpenLogin }) => {
 
           <button
             onClick={handlePublish}
-            disabled={publishing || (!text.trim() && !mediaPreview && !mediaUrlInput.trim())}
+            disabled={publishing || (!usernameInput.trim()) || (!text.trim() && !mediaPreview && !mediaUrlInput.trim())}
             className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:from-slate-200 disabled:to-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-[11px] font-black rounded-lg transition-all shadow-sm flex items-center gap-1.5 cursor-pointer uppercase tracking-wide shrink-0"
           >
             {publishing ? (

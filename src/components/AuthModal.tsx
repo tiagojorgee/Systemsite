@@ -97,6 +97,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return data;
     })
     .then((data) => {
+      if (data.token) {
+        localStorage.setItem('gamezone_jwt_token', data.token);
+      }
       const authUser: AppUser = {
         email: data.user.email,
         name: data.user.name,
@@ -155,6 +158,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           const data = await response.json();
           googleUser.email = data.user.email;
           googleUser.name = data.user.name;
+          if (data.token) {
+            localStorage.setItem('gamezone_jwt_token', data.token);
+          }
         }
 
         triggerToast(`🟢 Google conectado! Olá, ${googleUser.name}!`);
