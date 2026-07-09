@@ -3,7 +3,7 @@ import { PlayerStats, TransactionLog, ShopItem } from './types';
 import { Header } from './components/Header';
 import { CheckoutModal } from './components/CheckoutModal';
 import { SHOP_ITEMS, SKINS, ACCESSORIES, AURAS } from './data/shopItems';
-import { ShieldCheck, Sparkles, X, Heart, Coins } from 'lucide-react';
+import { ShieldCheck, Sparkles, X, Heart, Coins, Bell, UserPlus, Megaphone, MessageSquare } from 'lucide-react';
 import { playSound } from './utils/audio';
 import { getLevelForPoints, SKIN_LEVELS, ACCESSORY_LEVELS, AURA_LEVELS } from './utils/levelManager';
 import { AuthModal, AppUser } from './components/AuthModal';
@@ -82,6 +82,17 @@ export default function App() {
   });
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+
+  // Browser & App Push Notification States
+  const [notificationPermission, setNotificationPermission] = useState<string>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'unsupported';
+  });
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [showNotificationCenter, setShowNotificationCenter] = useState<boolean>(false);
+  const [lastNotification, setLastNotification] = useState<{ title: string; body: string; type: string } | null>(null);
 
   useEffect(() => {
     if (loggedInUser) {
@@ -494,6 +505,162 @@ export default function App() {
     setTimeout(() => setAppToast(null), 4000);
   }
 
+  const sendBrowserNotification = (title: string, options: any, type: 'chat' | 'friend' | 'promo' | 'test') => {
+    // Show in-app banner alert first for instant visual feedback
+    setLastNotification({ title, body: options.body || '', type });
+    setTimeout(() => setLastNotification(null), 5000);
+
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'granted') {
+        try {
+          // Play audio alert
+          playSound.victory();
+          new Notification(title, options);
+          return true;
+        } catch (e) {
+          console.warn('Browser blocked notification inside iframe, showing custom toast:', e);
+        }
+      }
+    }
+    
+    // Play audio alert anyway
+    try { playSound.victory(); } catch(e){}
+    // Fallback toast
+    let emoji = '🔔';
+    if (type === 'chat') emoji = '💬';
+    if (type === 'friend') emoji = '👥';
+    if (type === 'promo') emoji = '🎁';
+    triggerToast(`${emoji} ${title}: ${options.body}`);
+    return false;
+  };
+
+  // Request browser Notification Permission with instant state updates
+  const requestNotificationPermission = async () => {
+    playSound.click();
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      triggerToast('❌ Seu navegador não suporta notificações de área de trabalho.');
+      return;
+    }
+
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === 'granted') {
+        playSound.victory();
+        triggerToast('✅ Notificações ativadas! Agora você receberá alertas em tempo real.');
+        // Show test greeting notification
+        sendBrowserNotification('🚀 Notificações Prontas!', {
+          body: 'As notificações da Arena de Jogos foram configuradas com sucesso!',
+          icon: '/icon.png'
+        }, 'test');
+      } else if (permission === 'denied') {
+        triggerToast('⚠️ Permissão negada. Você precisará permitir nas configurações do seu navegador para receber alertas.');
+      }
+    } catch (err) {
+      console.error('Error requesting permission:', err);
+      // Fallback request
+      try {
+        Notification.requestPermission((permission) => {
+          setNotificationPermission(permission);
+          if (permission === 'granted') {
+            triggerToast('✅ Notificações ativadas!');
+          }
+        });
+      } catch (e) {
+        triggerToast('⚠️ Não foi possível solicitar permissões devido às restrições do iframe.');
+      }
+    }
+  };
+
+  // Setup periodic polling for notifications
+  useEffect(() => {
+    if (!loggedInUser) {
+      setUnreadCount(0);
+      return;
+    }
+
+    let lastChecked = new Date().toISOString();
+    let knownFollowersList: string[] = [];
+    let initialLoad = true;
+    let lastPromoId = localStorage.getItem('gamezone_last_promo_id') || '';
+
+    const checkNotifications = async () => {
+      try {
+        const url = `/api/user/notifications?userId=${loggedInUser.uid}&lastChecked=${lastChecked}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+
+        const data = await res.json();
+        if (data.success) {
+          // Update lastChecked instantly
+          lastChecked = new Date().toISOString();
+
+          // 1. New Messages in Chat
+          if (data.newMessages && data.newMessages.length > 0) {
+            // Only increment if not currently viewing chat tab
+            if (activeTab !== 'chat') {
+              setUnreadCount(prev => prev + data.newMessages.length);
+            }
+            data.newMessages.forEach((msg: any) => {
+              const textContent = msg.text || (msg.mediaType === 'image' ? '📷 Foto enviada' : '🎙️ Áudio enviado');
+              sendBrowserNotification('💬 Mensagem de Arena Chat', {
+                body: textContent,
+                icon: '/icon.png',
+                tag: msg.id
+              }, 'chat');
+            });
+          }
+
+          // 2. Friend Invitations / New Follows
+          const currentFollowers = data.followers || [];
+          if (initialLoad) {
+            knownFollowersList = currentFollowers;
+            initialLoad = false;
+          } else {
+            const newFollowers = currentFollowers.filter((fId: string) => !knownFollowersList.includes(fId));
+            if (newFollowers.length > 0) {
+              newFollowers.forEach((followerId: string) => {
+                sendBrowserNotification('👥 Novo Seguidor / Convite', {
+                  body: `O piloto "${followerId}" começou a seguir você! Retribua a amizade!`,
+                  icon: '/icon.png',
+                  tag: `follower-${followerId}`
+                }, 'friend');
+              });
+              knownFollowersList = currentFollowers;
+            }
+          }
+
+          // 3. New promotions
+          if (data.promotion && data.promotion.id !== lastPromoId) {
+            lastPromoId = data.promotion.id;
+            localStorage.setItem('gamezone_last_promo_id', lastPromoId);
+
+            sendBrowserNotification(data.promotion.title, {
+              body: data.promotion.body,
+              icon: '/icon.png',
+              tag: data.promotion.id
+            }, 'promo');
+          }
+        }
+      } catch (e) {
+        console.warn('Erro ao sincronizar notificações no background:', e);
+      }
+    };
+
+    // Poll every 8.5 seconds for instant response
+    checkNotifications();
+    const interval = setInterval(checkNotifications, 8500);
+
+    return () => clearInterval(interval);
+  }, [loggedInUser, activeTab]);
+
+  // Instantly clear unread messages when opening the chat
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      setUnreadCount(0);
+    }
+  }, [activeTab]);
+
   const handlePrefetchTab = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop') => {
     switch (tab) {
       case 'games':
@@ -545,6 +712,7 @@ export default function App() {
         onLogout={handleLogout}
         onOpenAuthModal={() => setShowAuthModal(true)}
         onPrefetchTab={handlePrefetchTab}
+        unreadCount={unreadCount}
       />
 
       {/* App-level Toast notifications */}
@@ -687,6 +855,209 @@ export default function App() {
           }}
           triggerToast={triggerToast}
         />
+      )}
+
+      {/* Real-time System Notification Banner Toast Overlay */}
+      {lastNotification && (
+        <div className="fixed top-6 right-6 z-50 p-4 bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700/60 max-w-sm w-80 flex gap-3 animate-slideIn backdrop-blur-md bg-slate-900/95">
+          <div className="p-2.5 rounded-xl shrink-0 h-fit bg-indigo-500/10 text-indigo-400">
+            {lastNotification.type === 'chat' && <Bell className="w-5 h-5 text-emerald-400 animate-pulse" />}
+            {lastNotification.type === 'friend' && <UserPlus className="w-5 h-5 text-cyan-400" />}
+            {lastNotification.type === 'promo' && <Megaphone className="w-5 h-5 text-amber-400" />}
+            {lastNotification.type === 'test' && <Sparkles className="w-5 h-5 text-indigo-400" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-xs font-black tracking-tight text-slate-100">{lastNotification.title}</h4>
+            <p className="text-[11px] text-slate-300 mt-1 font-sans font-medium line-clamp-3">{lastNotification.body}</p>
+          </div>
+          <button 
+            onClick={() => setLastNotification(null)}
+            className="text-slate-400 hover:text-white cursor-pointer self-start p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Floating Notification Control Trigger Button */}
+      <button
+        onClick={() => {
+          playSound.click();
+          setShowNotificationCenter(!showNotificationCenter);
+        }}
+        className="fixed bottom-24 right-6 z-40 p-3.5 bg-gradient-to-tr from-indigo-600 to-purple-600 text-white rounded-full shadow-2xl hover:scale-110 active:scale-95 cursor-pointer transition-all duration-300 group flex items-center justify-center border border-indigo-400/20"
+        title="Centro de Notificações Push"
+        id="floating-notification-bell"
+      >
+        <Bell className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+        {unreadCount > 0 && (
+          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-[10px] font-black text-white ring-2 ring-white shadow animate-bounce">
+            {unreadCount}
+          </span>
+        )}
+      </button>
+
+      {/* Notification Center Config Panel Drawer */}
+      {showNotificationCenter && (
+        <>
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-xs transition-opacity duration-300"
+            onClick={() => setShowNotificationCenter(false)}
+          />
+
+          <div 
+            className="fixed bottom-6 right-6 z-50 max-w-md w-[calc(100vw-48px)] sm:w-96 bg-white/95 backdrop-blur-md border border-slate-200/80 rounded-2xl p-5 shadow-2xl shadow-slate-400/40 animate-slideUp text-left font-sans flex flex-col gap-4 max-h-[85vh] overflow-y-auto"
+            id="notification-center-drawer"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                  <Bell className="w-4 h-4 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 leading-none">Notificações Push</h3>
+                  <p className="text-[10px] text-slate-400 mt-1 font-mono">Controle de Alertas em Tempo Real</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  playSound.click();
+                  setShowNotificationCenter(false);
+                }}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer transition-colors"
+              >
+                <X className="w-4.5 h-4.5" />
+              </button>
+            </div>
+
+            {/* Browser Permission Status */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200/60 rounded-xl space-y-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-slate-600 font-mono text-[11px] uppercase">Permissão do Navegador</span>
+                {notificationPermission === 'granted' && (
+                  <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-md font-mono text-[9px] font-black">
+                    🟢 ATIVO / PERMITIDO
+                  </span>
+                )}
+                {notificationPermission === 'denied' && (
+                  <span className="px-2 py-0.5 bg-rose-50 text-rose-600 border border-rose-200 rounded-md font-mono text-[9px] font-black">
+                    🔴 BLOQUEADO
+                  </span>
+                )}
+                {notificationPermission === 'default' && (
+                  <span className="px-2 py-0.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-md font-mono text-[9px] font-black">
+                    🟡 CONFIRMAÇÃO PENDENTE
+                  </span>
+                )}
+                {notificationPermission === 'unsupported' && (
+                  <span className="px-2 py-0.5 bg-slate-100 text-slate-500 border border-slate-200 rounded-md font-mono text-[9px] font-black">
+                    ⚫ NÃO SUPORTADO
+                  </span>
+                )}
+              </div>
+
+              <p className="text-[10.5px] text-slate-500 font-medium leading-relaxed">
+                Utilizamos a <strong className="text-slate-700">API de Notificações do Navegador</strong> para alertar você mesmo com o app minimizado. Ative abaixo para autorizar o envio de push.
+              </p>
+
+              {notificationPermission !== 'granted' ? (
+                <button
+                  onClick={requestNotificationPermission}
+                  className="w-full py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/10 hover:scale-[1.01] active:scale-95 transition-all"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>Ativar Notificações no Navegador</span>
+                </button>
+              ) : (
+                <div className="text-[10.5px] text-center text-emerald-600 bg-emerald-50/50 py-1.5 rounded-lg border border-emerald-100 font-bold flex items-center justify-center gap-1">
+                  <span>✅ Notificações Push do navegador configuradas corretamente!</span>
+                </div>
+              )}
+            </div>
+
+            {/* Interactive Simulation Playground (Anti-Iframe blocks constraint) */}
+            <div className="space-y-3">
+              <div className="space-y-0.5">
+                <span className="text-[10px] font-mono font-black text-indigo-600 uppercase tracking-wider block">Playground de Simulação</span>
+                <span className="text-[11px] text-slate-500 font-medium block">
+                  Como o app roda dentro de um iframe, alguns navegadores bloqueiam push nativo. Teste as notificações instantaneamente abaixo:
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2">
+                {/* Simulated Chat Push */}
+                <button
+                  onClick={() => {
+                    playSound.click();
+                    sendBrowserNotification('💬 GameChat: João Silva', {
+                      body: 'E aí, piloto! Bora correr uma partida rápida na arena agora? Te desafio!',
+                      icon: '/icon.png',
+                      tag: `sim-chat-${Date.now()}`
+                    }, 'chat');
+                  }}
+                  className="p-2.5 bg-white border border-slate-200/80 hover:border-emerald-200 hover:bg-emerald-50/20 text-slate-700 rounded-xl text-xs text-left font-bold flex items-center gap-2.5 cursor-pointer transition-all hover:translate-x-1.5"
+                >
+                  <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
+                    <MessageSquare className="w-3.5 h-3.5 animate-bounce" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-extrabold text-slate-800 text-[11px]">Simular Novo Chat</div>
+                    <div className="text-[9.5px] text-slate-400 font-medium font-mono">Alerta de Mensagem</div>
+                  </div>
+                </button>
+
+                {/* Simulated Follower / Friend Request Push */}
+                <button
+                  onClick={() => {
+                    playSound.click();
+                    sendBrowserNotification('👥 Novo Seguidor / Convite', {
+                      body: 'O piloto lendário "Gamer_99" começou a seguir seu perfil na Arena!',
+                      icon: '/icon.png',
+                      tag: `sim-follow-${Date.now()}`
+                    }, 'friend');
+                  }}
+                  className="p-2.5 bg-white border border-slate-200/80 hover:border-cyan-200 hover:bg-cyan-50/20 text-slate-700 rounded-xl text-xs text-left font-bold flex items-center gap-2.5 cursor-pointer transition-all hover:translate-x-1.5"
+                >
+                  <div className="p-1.5 bg-cyan-50 text-cyan-600 rounded-lg">
+                    <UserPlus className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-extrabold text-slate-800 text-[11px]">Simular Convite de Amigo</div>
+                    <div className="text-[9.5px] text-slate-400 font-medium font-mono">Alerta de Rede Social</div>
+                  </div>
+                </button>
+
+                {/* Simulated Promotion Push */}
+                <button
+                  onClick={() => {
+                    playSound.click();
+                    sendBrowserNotification('🎁 Oferta Imperial Relâmpago!', {
+                      body: 'Promoção Exclusiva: Pacote VIP de 500 moedas está com 30% de desconto hoje!',
+                      icon: '/icon.png',
+                      tag: `sim-promo-${Date.now()}`
+                    }, 'promo');
+                  }}
+                  className="p-2.5 bg-white border border-slate-200/80 hover:border-amber-200 hover:bg-amber-50/20 text-slate-700 rounded-xl text-xs text-left font-bold flex items-center gap-2.5 cursor-pointer transition-all hover:translate-x-1.5"
+                >
+                  <div className="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
+                    <Megaphone className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-extrabold text-slate-800 text-[11px]">Simular Promoção da Loja</div>
+                    <div className="text-[9.5px] text-slate-400 font-medium font-mono">Alerta de Lançamentos</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Explanatory system info footer */}
+            <div className="text-[9px] text-slate-400 font-mono leading-relaxed border-t border-slate-100 pt-3">
+              💡 <strong>Sincronização Ativa:</strong> O serviço consulta periodicamente o servidor SQLite a cada 8.5 segundos procurando por atualizações reais da sua conta.
+            </div>
+          </div>
+        </>
       )}
 
       {/* Global persistent Footer */}

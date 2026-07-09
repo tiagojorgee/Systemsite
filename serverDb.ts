@@ -785,6 +785,35 @@ export const serverDb = {
     });
   },
 
+  getNewMessagesForReceiver: (userId: string, lastChecked: string): ChatMessage[] => {
+    const rows = db.prepare(`
+      SELECT * FROM mensagens 
+      WHERE destinatario_id = ? AND created_at > ? AND apagada = 0
+      ORDER BY created_at ASC
+    `).all(userId, lastChecked) as any[];
+
+    return rows.map(row => {
+      let hiddenForArr: string[] = [];
+      try {
+        if (row.oculta_para) {
+          hiddenForArr = JSON.parse(row.oculta_para);
+        }
+      } catch (e) {}
+
+      return {
+        id: row.id,
+        senderId: row.remetente_id,
+        receiverId: row.destinatario_id,
+        text: row.texto || undefined,
+        mediaUrl: row.url_midia || undefined,
+        mediaType: row.tipo_midia as any,
+        created_at: row.created_at,
+        deleted: row.apagada === 1,
+        hiddenFor: hiddenForArr
+      };
+    });
+  },
+
   addMessage: (message: ChatMessage): void => {
     db.prepare(`
       INSERT INTO mensagens (id, remetente_id, destinatario_id, texto, url_midia, tipo_midia, created_at, apagada, oculta_para)

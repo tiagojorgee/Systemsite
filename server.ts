@@ -743,6 +743,46 @@ async function startServer() {
     }
   });
 
+  // GET /api/user/notifications - Fetch new messages, followers, and active store promotions
+  app.get("/api/user/notifications", (req, res) => {
+    const { userId, lastChecked } = req.query;
+    if (!userId) {
+      return res.status(400).json({ error: "O campo userId é obrigatório." });
+    }
+
+    try {
+      let newMessages: any[] = [];
+      if (lastChecked) {
+        newMessages = serverDb.getNewMessagesForReceiver(userId as string, lastChecked as string);
+      }
+
+      // Check current followers from profile
+      const profile = serverDb.getProfile(userId as string);
+      const followers = profile?.followers || [];
+
+      // Dynamic store promotions
+      const promos = [
+        { id: "promo-vip-1", title: "👑 Bônus VIP Ativo na Loja!", body: "Adquira moedas ou vidas com 15% de cashback na carteira agora!" },
+        { id: "promo-skin-2", title: "🎨 Novidades no Customizador de Piloto!", body: "Novos trajes e auras brilhantes foram adicionados para customização." },
+        { id: "promo-football-3", title: "⚽ Rodada de Palpites Liberada!", body: "Dobre suas moedas palpitando nos clássicos de futebol desta semana!" },
+        { id: "promo-cinema-4", title: "🍿 Cine Lounge tem novos trailers!", body: "Venha assistir aos lançamentos e interagir no chat coletivo do lounge!" }
+      ];
+      
+      const currentMinute = new Date().getMinutes();
+      const promotion = promos[currentMinute % promos.length];
+
+      return res.json({
+        success: true,
+        newMessages,
+        followers,
+        promotion
+      });
+    } catch (err: any) {
+      console.error("[GET NOTIFICATIONS ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar notificações." });
+    }
+  });
+
   // POST /api/chat/message - Send a text, photo, or audio message
   app.post("/api/chat/message", (req, res) => {
     const { senderId, receiverId, text, mediaUrl, mediaType } = req.body;

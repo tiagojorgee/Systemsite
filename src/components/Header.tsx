@@ -36,6 +36,7 @@ interface HeaderProps {
   onLogout: () => void;
   onOpenAuthModal: () => void;
   onPrefetchTab?: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat') => void;
+  unreadCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -48,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onOpenAuthModal,
   onPrefetchTab,
+  unreadCount = 0,
 }) => {
   const [showUserDropdown, setShowUserDropdown] = useState(false);
 
@@ -386,7 +388,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={() => handleTabClick('chat')}
           onMouseEnter={() => onPrefetchTab?.('chat')}
           onTouchStart={() => onPrefetchTab?.('chat')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 relative ${
             activeTab === 'chat'
               ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white border border-emerald-500/30 shadow-lg shadow-emerald-600/15 scale-[1.02]'
               : 'text-slate-500 hover:text-emerald-600 hover:bg-slate-100/50 border border-transparent'
@@ -394,7 +396,12 @@ export const Header: React.FC<HeaderProps> = ({
           id="tab-chat"
         >
           <MessageSquare className="w-3.5 h-3.5" />
-          GameChat 💬
+          <span>GameChat 💬</span>
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-black text-white ring-2 ring-white animate-bounce shadow">
+              {unreadCount}
+            </span>
+          )}
         </button>
 
         <button
