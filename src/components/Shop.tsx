@@ -99,11 +99,11 @@ export const Shop: React.FC<ShopProps> = ({
       {/* Title */}
       <div className="text-center md:text-left mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-extrabold text-white flex items-center justify-center md:justify-start gap-2">
-            <ShoppingBag className="w-6 h-6 text-amber-400" />
+          <h2 className="text-2xl font-extrabold text-slate-900 flex items-center justify-center md:justify-start gap-2">
+            <ShoppingBag className="w-6 h-6 text-amber-500" />
             Loja Oficial &amp; Segura
           </h2>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-600 text-sm mt-1 font-medium">
             Compre vidas adicionais, pacotes de moedas e boosters para superar recordes. Transações protegidas por SSL.
           </p>
         </div>

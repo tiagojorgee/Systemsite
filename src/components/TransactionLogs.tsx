@@ -34,11 +34,11 @@ export const TransactionLogs: React.FC<TransactionLogsProps> = ({ logs }) => {
     <div className="p-4 md:p-6 max-w-5xl mx-auto">
       {/* Title */}
       <div className="text-center md:text-left mb-6">
-        <h2 className="text-2xl font-extrabold text-white flex items-center justify-center md:justify-start gap-2">
-          <History className="w-6 h-6 text-slate-400" />
+        <h2 className="text-2xl font-extrabold text-slate-900 flex items-center justify-center md:justify-start gap-2">
+          <History className="w-6 h-6 text-slate-500" />
           Extrato &amp; Auditoria de Transações
         </h2>
-        <p className="text-slate-400 text-sm mt-1">
+        <p className="text-slate-600 text-sm mt-1 font-medium">
           Registro completo de compras, resgates e pontuações ganhas, criptografados e assinados digitalmente.
         </p>
       </div>

@@ -181,6 +181,23 @@ db.exec(`
     apagada INTEGER DEFAULT 0,
     oculta_para TEXT DEFAULT '[]'
   );
+
+  CREATE TABLE IF NOT EXISTS filmes (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    category TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    rating TEXT NOT NULL,
+    duration TEXT NOT NULL,
+    match_score INTEGER NOT NULL,
+    image_url TEXT NOT NULL,
+    youtube_id TEXT,
+    tags TEXT NOT NULL,
+    uploader_id TEXT NOT NULL,
+    uploader_name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `);
 
 // Migrate existing tables if they don't have the new columns
@@ -853,5 +870,51 @@ export const serverDb = {
 
     db.prepare('UPDATE mensagens SET oculta_para = ? WHERE id = ?').run(JSON.stringify(hiddenForArr), messageId);
     return true;
+  },
+
+  getMovies: (): any[] => {
+    const rows = db.prepare('SELECT * FROM filmes ORDER BY created_at DESC').all() as any[];
+    return rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      description: row.description || '',
+      category: row.category,
+      year: row.year,
+      rating: row.rating,
+      duration: row.duration,
+      match_score: row.match_score,
+      image_url: row.image_url,
+      youtube_id: row.youtube_id || undefined,
+      tags: JSON.parse(row.tags || '[]'),
+      uploaderId: row.uploader_id,
+      uploaderName: row.uploader_name,
+      createdAt: row.created_at
+    }));
+  },
+
+  addMovie: (movie: any): void => {
+    db.prepare(`
+      INSERT OR REPLACE INTO filmes (id, title, description, category, year, rating, duration, match_score, image_url, youtube_id, tags, uploader_id, uploader_name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      movie.id,
+      movie.title,
+      movie.description || '',
+      movie.category,
+      movie.year,
+      movie.rating,
+      movie.duration,
+      movie.match_score,
+      movie.image_url,
+      movie.youtube_id || null,
+      JSON.stringify(movie.tags || []),
+      movie.uploaderId,
+      movie.uploaderName,
+      movie.createdAt || new Date().toISOString()
+    );
+  },
+
+  getProfilesWithStores: (): any[] => {
+    return db.prepare('SELECT usuario_id, nome, avatar, lojas FROM perfis').all() as any[];
   }
 };

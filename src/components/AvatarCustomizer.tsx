@@ -117,11 +117,11 @@ export const AvatarCustomizer: React.FC<AvatarCustomizerProps> = ({
     <div className="p-4 md:p-6 max-w-5xl mx-auto">
       {/* Title */}
       <div className="text-center md:text-left mb-6">
-        <h2 className="text-2xl font-extrabold text-white flex items-center justify-center md:justify-start gap-2">
-          <Sparkles className="w-6 h-6 text-indigo-400 animate-pulse" />
+        <h2 className="text-2xl font-extrabold text-slate-900 flex items-center justify-center md:justify-start gap-2">
+          <Sparkles className="w-6 h-6 text-indigo-500 animate-pulse" />
           Personalização do Avatar
         </h2>
-        <p className="text-slate-400 text-sm mt-1">
+        <p className="text-slate-600 text-sm mt-1 font-medium">
           Crie sua identidade para as arenas! Desbloqueie cores raras, chapéus estilosos e auras holográficas incríveis.
         </p>
       </div>

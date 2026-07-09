@@ -76,6 +76,7 @@ export const ChatPortal: React.FC<ChatPortalProps> = ({ loggedInUser, onOpenLogi
 
   // Scroll ref
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Video & Voice call states
   const [activeCall, setActiveCall] = useState<{
@@ -242,9 +243,13 @@ export const ChatPortal: React.FC<ChatPortalProps> = ({ loggedInUser, onOpenLogi
     }
   }, [selectedContact, loggedInUser]);
 
-  // Scroll to bottom whenever messages list updates
+  // Scroll to bottom whenever messages list updates without shifting page layout
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   // Handle Search filtering
@@ -700,7 +705,7 @@ export const ChatPortal: React.FC<ChatPortalProps> = ({ loggedInUser, onOpenLogi
             </div>
 
             {/* Conversation Messages Thread Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-[#efeae2]/80 relative" style={{ backgroundImage: 'url(https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png)' }}>
+            <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-[#efeae2]/80 relative" style={{ backgroundImage: 'url(https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png)' }}>
               
               {isLoadingMessages && messages.length === 0 ? (
                 <div className="p-4 text-center text-slate-400 text-xs bg-white/60 backdrop-blur rounded-xl max-w-xs mx-auto">Carregando histórico...</div>

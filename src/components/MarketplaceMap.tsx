@@ -253,23 +253,37 @@ export const MarketplaceMap: React.FC<MarketplaceMapProps> = ({
   setRealBalance
 }) => {
   // Persistence state
-  const [stores, setStores] = useState<UserStore[]>(() => {
-    const cached = localStorage.getItem('gamezone_user_stores');
-    return cached ? JSON.parse(cached) : INITIAL_STORES;
-  });
+  const [stores, setStores] = useState<UserStore[]>(INITIAL_STORES);
+  const [products, setProducts] = useState<AffiliateProduct[]>(INITIAL_PRODUCTS);
 
-  const [products, setProducts] = useState<AffiliateProduct[]>(() => {
-    const cached = localStorage.getItem('gamezone_user_store_products');
-    return cached ? JSON.parse(cached) : INITIAL_PRODUCTS;
-  });
+  const fetchMarketplaceStores = async () => {
+    try {
+      const res = await fetch('/api/marketplace/stores');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && Array.isArray(data.stores)) {
+          const fetchedStores = data.stores.length > 0 ? data.stores : INITIAL_STORES;
+          setStores(fetchedStores);
+          
+          const allProducts: AffiliateProduct[] = [];
+          fetchedStores.forEach((st: any) => {
+            if (Array.isArray(st.products)) {
+              allProducts.push(...st.products);
+            }
+          });
+          
+          const finalProducts = allProducts.length > 0 ? allProducts : INITIAL_PRODUCTS;
+          setProducts(finalProducts);
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching marketplace stores:', e);
+    }
+  };
 
   useEffect(() => {
-    localStorage.setItem('gamezone_user_stores', JSON.stringify(stores));
-  }, [stores]);
-
-  useEffect(() => {
-    localStorage.setItem('gamezone_user_store_products', JSON.stringify(products));
-  }, [products]);
+    fetchMarketplaceStores();
+  }, [loggedInUser]);
 
   // View States
   const [selectedStore, setSelectedStore] = useState<UserStore | null>(null);
@@ -444,6 +458,12 @@ export const MarketplaceMap: React.FC<MarketplaceMapProps> = ({
       if (onOpenLogin) onOpenLogin();
       return;
     }
+    // Strict business rule: User must be an active VIP member with a monthly subscription
+    if (!stats?.isVip) {
+      playSound.tick();
+      setStoreFormError('⚠️ ASSINATURA VIP NECESSÁRIA! Você precisa ser um assinante VIP ativo para abrir sua própria loja virtual de afiliados na plataforma.');
+      return;
+    }
     if (!newStoreName.trim()) {
       setStoreFormError('Preencha o nome da sua loja!');
       return;
@@ -454,7 +474,7 @@ export const MarketplaceMap: React.FC<MarketplaceMapProps> = ({
     }
 
     const uniqueId = `store-${Date.now()}`;
-    const newStore: UserStore = {
+    const newStore: UserStore & { products: AffiliateProduct[] } = {
       id: uniqueId,
       userId: loggedInUser.uid || loggedInUser.email,
       userName: loggedInUser.name || 'Gamer Parceiro',
@@ -465,10 +485,28 @@ export const MarketplaceMap: React.FC<MarketplaceMapProps> = ({
       longitude: newStoreLng,
       city: newStoreCity.split('/')[0],
       bannerColor: newStoreBanner,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      products: []
     };
 
     setStores(prev => [newStore, ...prev]);
+
+    // Persist to the SQLite database under user's profile detail "lojas" field
+    fetch('/api/user/profile/details', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        userId: loggedInUser.uid || loggedInUser.email,
+        stores: [newStore]
+      })
+    }).then(() => {
+      fetchMarketplaceStores();
+    }).catch(err => {
+      console.error('Error saving store to backend:', err);
+    });
+
     playSound.purchase();
     setStoreFormSuccess('🎉 Sua loja de afiliado foi inaugurada com sucesso!');
     setStoreFormError(null);

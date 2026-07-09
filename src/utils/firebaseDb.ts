@@ -236,19 +236,16 @@ export interface FirestoreMovie {
 export async function getMovies(): Promise<FirestoreMovie[]> {
   const path = 'movies';
 
-  if (isRealFirebaseEnabled && dbInstance) {
-    try {
-      const firebaseFirestore = require('firebase/firestore');
-      const colRef = firebaseFirestore.collection(dbInstance, 'movies');
-      const snap = await firebaseFirestore.getDocs(colRef);
-      const movies: FirestoreMovie[] = [];
-      snap.forEach((docSnap: any) => {
-        movies.push(docSnap.data() as FirestoreMovie);
-      });
-      if (movies.length > 0) return movies;
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, path);
+  try {
+    const res = await fetch('/api/movies');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.movies) && data.movies.length > 0) {
+        return data.movies;
+      }
     }
+  } catch (err) {
+    console.warn('[SERVER] Failed to fetch movies from backend SQLite, using fallback:', err);
   }
 
   // Load from local storage simulated Firestore
@@ -268,20 +265,21 @@ export async function getMovies(): Promise<FirestoreMovie[]> {
 export async function addMovie(movie: FirestoreMovie): Promise<void> {
   const path = `movies/${movie.id}`;
 
-  // Update local storage representation
+  // Update local representation
   const currentMovies = await getMovies();
   const updatedMovies = [movie, ...currentMovies.filter(m => m.id !== movie.id)];
   localStorage.setItem('gamezone_simulated_movies', JSON.stringify(updatedMovies));
 
-  if (isRealFirebaseEnabled && dbInstance) {
-    try {
-      const firebaseFirestore = require('firebase/firestore');
-      const docRef = firebaseFirestore.doc(dbInstance, 'movies', movie.id);
-      await firebaseFirestore.setDoc(docRef, movie);
-      return;
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
-    }
+  try {
+    await fetch('/api/movies', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ movie })
+    });
+  } catch (err) {
+    console.warn('[SERVER] Failed to save movie to backend SQLite:', err);
   }
 }
 

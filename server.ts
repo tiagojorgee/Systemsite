@@ -851,6 +851,87 @@ async function startServer() {
     }
   });
 
+  // GET /api/marketplace/stores - Retrieve all active virtual stores across all profiles
+  app.get("/api/marketplace/stores", (req, res) => {
+    try {
+      const rows = serverDb.getProfilesWithStores();
+      const allStores: any[] = [];
+      
+      rows.forEach(row => {
+        if (row.lojas) {
+          try {
+            const userStores = JSON.parse(row.lojas);
+            if (Array.isArray(userStores)) {
+              const mapped = userStores.map(st => ({
+                ...st,
+                userName: row.nome || st.userName,
+                userAvatar: row.avatar || st.userAvatar || '🎮'
+              }));
+              allStores.push(...mapped);
+            }
+          } catch (e) {
+            console.error('Error parsing stores JSON:', e);
+          }
+        }
+      });
+      
+      return res.json({ success: true, stores: allStores });
+    } catch (err: any) {
+      console.error("[GET STORES ERROR]", err);
+      return res.status(500).json({ error: "Erro ao carregar lojas do marketplace." });
+    }
+  });
+
+  // GET /api/movies - Retrieve all community movies and trailers
+  app.get("/api/movies", (req, res) => {
+    try {
+      const movies = serverDb.getMovies();
+      return res.json({ success: true, movies });
+    } catch (err: any) {
+      console.error("[GET MOVIES ERROR]", err);
+      return res.status(500).json({ error: "Erro ao carregar catálogo de filmes." });
+    }
+  });
+
+  // POST /api/movies - Publish a new community movie and auto-announce on Arena Feed
+  app.post("/api/movies", (req, res) => {
+    const { movie } = req.body;
+    if (!movie || !movie.id || !movie.title || !movie.uploaderId) {
+      return res.status(400).json({ error: "Dados do filme incompletos." });
+    }
+
+    try {
+      // 1. Add movie to SQLite
+      serverDb.addMovie(movie);
+
+      // 2. Automatically format and publish an announcement to the Arena Feed
+      const postText = `🎬 NOVO FILME DISPONÍVEL NO CINEMA DA ARENA! 🍿\n\nAcabei de publicar "${movie.title}" (${movie.year}) na categoria ${movie.category}.\n\n"${movie.description}"\n\nAssista agora na aba Cinema! 🎥🔥`;
+      
+      const newPost = {
+        id: `post-movie-${movie.id}`,
+        text: postText,
+        media_url: movie.image_url,
+        userId: movie.uploaderId,
+        likes: [],
+        media_type: 'image',
+        username: movie.uploaderName || 'Gamer Cinema',
+        userAvatarUrl: '🎬',
+        created_at: movie.createdAt || new Date().toISOString(),
+        evaluations: {},
+        comments: [],
+        isAd: false,
+        hiddenFor: []
+      };
+      
+      serverDb.addPost(newPost);
+
+      return res.json({ success: true, movie });
+    } catch (err: any) {
+      console.error("[POST MOVIE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao publicar filme." });
+    }
+  });
+
   // Vite integration middleware
   if (process.env.NODE_ENV !== "production") {
     console.log("[SERVER] Starting in development mode with Vite middleware...");
