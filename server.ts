@@ -605,6 +605,212 @@ async function startServer() {
     return res.json({ success: true, reply: newReply });
   });
 
+  // --- COMPREHENSIVE NEW PORTAL & WHATSAPP CHAT ENDPOINTS ---
+
+  // POST /api/upload - Handle profile photos, chat photos, or recorded audio files
+  app.post("/api/upload", upload.single("file"), (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "Nenhum arquivo enviado para upload." });
+    }
+    const fileUrl = `/uploads/${req.file.filename}`;
+    return res.json({ success: true, url: fileUrl });
+  });
+
+  // POST /api/user/profile/details - Modify biography, name, username, avatar, stores, files, avatarGallery
+  app.post("/api/user/profile/details", (req, res) => {
+    const { userId, name, username, biography, avatar, stores, files, avatarGallery } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "O campo userId é obrigatório." });
+    }
+
+    try {
+      if (username) {
+        const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+        if (cleanUsername !== username) {
+          return res.status(400).json({ error: "O nome de usuário deve conter apenas letras, números e underlines (_)." });
+        }
+        if (serverDb.checkUsernameExists(cleanUsername, userId)) {
+          return res.status(400).json({ error: "Este nome de usuário já está sendo usado por outro jogador." });
+        }
+      }
+
+      serverDb.updateProfileDetails(userId, { name, username, biography, avatar, stores, files, avatarGallery });
+      const updatedProfile = serverDb.getProfile(userId);
+      return res.json({ success: true, profile: updatedProfile });
+    } catch (err: any) {
+      console.error("[PROFILE UPDATE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao atualizar dados do perfil." });
+    }
+  });
+
+  // GET /api/user/users - List all profiles on the platform to follow or start chats
+  app.get("/api/user/users", (req, res) => {
+    try {
+      const usersDict = serverDb.getUsers();
+      const profilesList = Object.keys(usersDict).map(uid => {
+        const p = serverDb.getProfile(uid);
+        return {
+          uid,
+          email: usersDict[uid].email,
+          name: p?.username ? `${usersDict[uid].name} (@${p.username})` : usersDict[uid].name,
+          rawName: usersDict[uid].name,
+          username: p?.username,
+          avatarUrl: p?.avatarUrl || usersDict[uid].avatarUrl,
+          biography: p?.biography,
+          followers: p?.followers || [],
+          following: p?.following || [],
+          stores: p?.stores || [],
+          files: p?.files || [],
+          avatarGallery: p?.avatarGallery || []
+        };
+      });
+      return res.json({ users: profilesList });
+    } catch (err: any) {
+      console.error("[GET USERS ERROR]", err);
+      return res.status(500).json({ error: "Erro ao listar usuários." });
+    }
+  });
+
+  // POST /api/user/follow - Follow or unfollow a profile
+  app.post("/api/user/follow", (req, res) => {
+    const { senderId, targetId } = req.body;
+    if (!senderId || !targetId) {
+      return res.status(400).json({ error: "Campos senderId e targetId são obrigatórios." });
+    }
+
+    try {
+      const result = serverDb.toggleFollow(senderId, targetId);
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      console.error("[TOGGLE FOLLOW ERROR]", err);
+      return res.status(500).json({ error: "Erro ao seguir/deixar de seguir." });
+    }
+  });
+
+  // POST /api/feed/post/delete - Delete a feed post
+  app.post("/api/feed/post/delete", (req, res) => {
+    const { postId, userId } = req.body;
+    if (!postId || !userId) {
+      return res.status(400).json({ error: "Campos postId e userId são obrigatórios." });
+    }
+
+    try {
+      const success = serverDb.deletePost(postId, userId);
+      if (success) {
+        return res.json({ success: true, message: "Publicação excluída com sucesso." });
+      } else {
+        return res.status(403).json({ error: "Não autorizado ou postagem não encontrada." });
+      }
+    } catch (err: any) {
+      console.error("[POST DELETE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao excluir postagem." });
+    }
+  });
+
+  // POST /api/feed/post/hide - Hide a feed post from the current user's feed
+  app.post("/api/feed/post/hide", (req, res) => {
+    const { postId, userId } = req.body;
+    if (!postId || !userId) {
+      return res.status(400).json({ error: "Campos postId e userId são obrigatórios." });
+    }
+
+    try {
+      const success = serverDb.hidePost(postId, userId);
+      if (success) {
+        return res.json({ success: true, message: "Publicação ocultada com sucesso." });
+      } else {
+        return res.status(404).json({ error: "Postagem não encontrada." });
+      }
+    } catch (err: any) {
+      console.error("[POST HIDE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao ocultar postagem." });
+    }
+  });
+
+  // GET /api/chat/messages - Retrieve WhatsApp messages between two users
+  app.get("/api/chat/messages", (req, res) => {
+    const { userA, userB } = req.query;
+    if (!userA || !userB) {
+      return res.status(400).json({ error: "Os parâmetros userA e userB são obrigatórios." });
+    }
+
+    try {
+      const messages = serverDb.getMessages(userA as string, userB as string);
+      return res.json({ success: true, messages });
+    } catch (err: any) {
+      console.error("[GET MESSAGES ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar mensagens do chat." });
+    }
+  });
+
+  // POST /api/chat/message - Send a text, photo, or audio message
+  app.post("/api/chat/message", (req, res) => {
+    const { senderId, receiverId, text, mediaUrl, mediaType } = req.body;
+    if (!senderId || !receiverId) {
+      return res.status(400).json({ error: "Os campos senderId e receiverId são obrigatórios." });
+    }
+
+    try {
+      const newMessage = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        senderId,
+        receiverId,
+        text: text || "",
+        mediaUrl: mediaUrl || "",
+        mediaType: mediaType || "text",
+        created_at: new Date().toISOString(),
+        deleted: false,
+        hiddenFor: []
+      };
+
+      serverDb.addMessage(newMessage);
+      return res.json({ success: true, message: newMessage });
+    } catch (err: any) {
+      console.error("[SEND MESSAGE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao enviar mensagem." });
+    }
+  });
+
+  // POST /api/chat/message/delete - Delete/unsend a message for all users
+  app.post("/api/chat/message/delete", (req, res) => {
+    const { messageId } = req.body;
+    if (!messageId) {
+      return res.status(400).json({ error: "O campo messageId é obrigatório." });
+    }
+
+    try {
+      const success = serverDb.deleteMessage(messageId);
+      if (success) {
+        return res.json({ success: true, message: "Mensagem apagada com sucesso." });
+      } else {
+        return res.status(404).json({ error: "Mensagem não encontrada." });
+      }
+    } catch (err: any) {
+      console.error("[DELETE MESSAGE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao apagar mensagem." });
+    }
+  });
+
+  // POST /api/chat/message/hide - Hide/archive a message for a specific user
+  app.post("/api/chat/message/hide", (req, res) => {
+    const { messageId, userId } = req.body;
+    if (!messageId || !userId) {
+      return res.status(400).json({ error: "Os campos messageId e userId são obrigatórios." });
+    }
+
+    try {
+      const success = serverDb.hideMessage(messageId, userId);
+      if (success) {
+        return res.json({ success: true, message: "Mensagem ocultada com sucesso." });
+      } else {
+        return res.status(404).json({ error: "Mensagem não encontrada." });
+      }
+    } catch (err: any) {
+      console.error("[HIDE MESSAGE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao ocultar mensagem." });
+    }
+  });
+
   // Vite integration middleware
   if (process.env.NODE_ENV !== "production") {
     console.log("[SERVER] Starting in development mode with Vite middleware...");

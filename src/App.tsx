@@ -2,7 +2,6 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 import { PlayerStats, TransactionLog, ShopItem } from './types';
 import { Header } from './components/Header';
 import { CheckoutModal } from './components/CheckoutModal';
-import { GoogleDriveSyncBar } from './components/GoogleDriveSyncBar';
 import { SHOP_ITEMS, SKINS, ACCESSORIES, AURAS } from './data/shopItems';
 import { ShieldCheck, Sparkles, X, Heart, Coins } from 'lucide-react';
 import { playSound } from './utils/audio';
@@ -21,6 +20,8 @@ const FootballBets = lazy(() => import('./components/FootballBets').then(m => ({
 const Cinema = lazy(() => import('./components/Cinema').then(m => ({ default: m.Cinema })));
 const GamezoneShop = lazy(() => import('./components/GamezoneShop').then(m => ({ default: m.GamezoneShop })));
 const Feed = lazy(() => import('./components/Feed').then(m => ({ default: m.Feed })));
+const ChatPortal = lazy(() => import('./components/ChatPortal').then(m => ({ default: m.ChatPortal })));
+const ProfilePortal = lazy(() => import('./components/ProfilePortal').then(m => ({ default: m.ProfilePortal })));
 
 interface TabLoaderProps {
   tabName: string;
@@ -546,21 +547,6 @@ export default function App() {
         onPrefetchTab={handlePrefetchTab}
       />
 
-      {/* Google Drive Cloud DB Sync Bar */}
-      <GoogleDriveSyncBar
-        stats={stats}
-        realBalance={realBalance}
-        withdrawLimit={withdrawLimit}
-        logs={logs}
-        setStats={setStats}
-        setRealBalance={setRealBalance}
-        setWithdrawLimit={setWithdrawLimit}
-        setLogs={setLogs}
-        triggerToast={triggerToast}
-        loggedInUser={loggedInUser}
-        setLoggedInUser={setLoggedInUser}
-      />
-
       {/* App-level Toast notifications */}
       {appToast && (
         <div className="fixed bottom-6 right-6 z-50 p-4 bg-emerald-900/90 text-emerald-200 border border-emerald-700/80 rounded-xl shadow-2xl flex items-center gap-3 animate-slideIn max-w-sm">
@@ -661,6 +647,23 @@ export default function App() {
             <Feed
               loggedInUser={loggedInUser}
               onOpenLogin={() => setShowAuthModal(true)}
+            />
+          )}
+
+          {activeTab === 'chat' && (
+            <ChatPortal
+              loggedInUser={loggedInUser}
+              onOpenLogin={() => setShowAuthModal(true)}
+            />
+          )}
+
+          {activeTab === 'profile' && (
+            <ProfilePortal
+              loggedInUser={loggedInUser}
+              setLoggedInUser={setLoggedInUser}
+              onOpenLogin={() => setShowAuthModal(true)}
+              stats={stats}
+              updateStats={updateStats}
             />
           )}
         </Suspense>

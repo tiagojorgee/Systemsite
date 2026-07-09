@@ -28,14 +28,14 @@ import { AppUser } from './AuthModal';
 
 interface HeaderProps {
   stats: PlayerStats;
-  activeTab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed';
-  setActiveTab: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed') => void;
+  activeTab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat';
+  setActiveTab: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat') => void;
   openCheckoutForQuickBuy: (itemId: string) => void;
   realBalance?: number;
   loggedInUser: AppUser | null;
   onLogout: () => void;
   onOpenAuthModal: () => void;
-  onPrefetchTab?: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed') => void;
+  onPrefetchTab?: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -51,7 +51,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [showUserDropdown, setShowUserDropdown] = useState(false);
 
-  const handleTabClick = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed') => {
+  const handleTabClick = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat') => {
     setActiveTab(tab);
     playSound.click();
   };
@@ -188,26 +188,17 @@ export const Header: React.FC<HeaderProps> = ({
                         </div>
                       </div>
 
-                      {/* Google Drive sync highlight trigger */}
-                      {loggedInUser.provider === 'google' && (
-                        <button
-                          onClick={() => {
-                            setShowUserDropdown(false);
-                            const syncBar = document.querySelector('h4')?.closest('.bg-slate-900');
-                            if (syncBar) {
-                              syncBar.scrollIntoView({ behavior: 'smooth' });
-                              syncBar.classList.add('ring-2', 'ring-indigo-500', 'ring-offset-2', 'ring-offset-slate-950');
-                              setTimeout(() => {
-                                syncBar.classList.remove('ring-2', 'ring-indigo-500', 'ring-offset-2', 'ring-offset-slate-950');
-                              }, 1500);
-                            }
-                          }}
-                          className="w-full py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-600 hover:text-indigo-700 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-all"
-                        >
-                          <Database className="w-3 h-3" />
-                          <span>Configurar Nuvem Drive</span>
-                        </button>
-                      )}
+                      {/* Profile Settings shortcut trigger */}
+                      <button
+                        onClick={() => {
+                          setShowUserDropdown(false);
+                          handleTabClick('profile');
+                        }}
+                        className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-600 hover:text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                      >
+                        <User className="w-3.5 h-3.5" />
+                        <span>Configurar Perfil 👤</span>
+                      </button>
 
                       {/* Logout Action */}
                       <button
@@ -387,8 +378,38 @@ export const Header: React.FC<HeaderProps> = ({
           }`}
           id="tab-feed"
         >
-          <MessageSquare className="w-3.5 h-3.5 text-indigo-500 active-tab:text-white" />
+          <MessageSquare className="w-3.5 h-3.5" />
           Feed da Arena 💬
+        </button>
+
+        <button
+          onClick={() => handleTabClick('chat')}
+          onMouseEnter={() => onPrefetchTab?.('chat')}
+          onTouchStart={() => onPrefetchTab?.('chat')}
+          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'chat'
+              ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white border border-emerald-500/30 shadow-lg shadow-emerald-600/15 scale-[1.02]'
+              : 'text-slate-500 hover:text-emerald-600 hover:bg-slate-100/50 border border-transparent'
+          }`}
+          id="tab-chat"
+        >
+          <MessageSquare className="w-3.5 h-3.5" />
+          GameChat 💬
+        </button>
+
+        <button
+          onClick={() => handleTabClick('profile')}
+          onMouseEnter={() => onPrefetchTab?.('profile')}
+          onTouchStart={() => onPrefetchTab?.('profile')}
+          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'profile'
+              ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white border border-indigo-500/30 shadow-lg shadow-indigo-600/15 scale-[1.02]'
+              : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-100/50 border border-transparent'
+          }`}
+          id="tab-profile"
+        >
+          <User className="w-3.5 h-3.5" />
+          Meu Perfil 👤
         </button>
         <button
           onClick={() => handleTabClick('games')}

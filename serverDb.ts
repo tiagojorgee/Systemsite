@@ -33,6 +33,27 @@ export interface UserProfile {
   };
   realBalance: number;
   withdrawLimit: number;
+  // Extended configuration fields
+  username?: string;
+  biography?: string;
+  avatarUrl?: string;
+  avatarGallery?: string[];
+  following?: string[]; // Array of user_ids followed
+  followers?: string[]; // Array of user_ids following this profile
+  stores?: any[];       // User's customized virtual stores
+  files?: any[];        // File uploads meta-registry
+}
+
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  text?: string;
+  mediaUrl?: string;
+  mediaType?: 'text' | 'image' | 'audio';
+  created_at: string;
+  deleted: boolean;
+  hiddenFor: string[]; // Array of user_ids who hid this message
 }
 
 export interface TransactionLog {
@@ -84,6 +105,7 @@ export interface FeedPost {
   adTitle?: string;
   adActionUrl?: string;
   adCategory?: 'movie' | 'game' | 'shop';
+  hiddenFor?: string[]; // Array of user_ids who hid this post
 }
 
 const DB_FILE_PATH = path.join(process.cwd(), 'database.sqlite');
@@ -94,7 +116,7 @@ const db = new Database(DB_FILE_PATH);
 // Enable WAL mode for high performance
 db.pragma('journal_mode = WAL');
 
-// Create tables
+// Create tables supporting profile settings, follows, stores, files and WhatsApp chat
 db.exec(`
   CREATE TABLE IF NOT EXISTS usuarios (
     id TEXT PRIMARY KEY,
@@ -105,10 +127,16 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS perfis (
     usuario_id TEXT PRIMARY KEY,
     nome TEXT NOT NULL,
+    username TEXT,
     avatar TEXT,
+    biografia TEXT,
     stats TEXT,
     real_balance REAL DEFAULT 120.0,
-    withdraw_limit REAL DEFAULT 100.0
+    withdraw_limit REAL DEFAULT 100.0,
+    seguindo TEXT DEFAULT '[]',
+    seguidores TEXT DEFAULT '[]',
+    lojas TEXT DEFAULT '[]',
+    arquivos TEXT DEFAULT '[]'
   );
 
   CREATE TABLE IF NOT EXISTS posts (
@@ -126,7 +154,8 @@ db.exec(`
     is_ad INTEGER DEFAULT 0,
     ad_title TEXT,
     ad_action_url TEXT,
-    ad_category TEXT
+    ad_category TEXT,
+    oculto_para TEXT DEFAULT '[]'
   );
 
   CREATE TABLE IF NOT EXISTS logs (
@@ -140,7 +169,38 @@ db.exec(`
     status TEXT NOT NULL,
     security_hash TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS mensagens (
+    id TEXT PRIMARY KEY,
+    remetente_id TEXT NOT NULL,
+    destinatario_id TEXT NOT NULL,
+    texto TEXT,
+    url_midia TEXT,
+    tipo_midia TEXT DEFAULT 'text',
+    created_at TEXT NOT NULL,
+    apagada INTEGER DEFAULT 0,
+    oculta_para TEXT DEFAULT '[]'
+  );
 `);
+
+// Migrate existing tables if they don't have the new columns
+const runMigration = (table: string, column: string, definition: string) => {
+  try {
+    db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+  } catch (e) {
+    // Column already exists, ignore error
+  }
+};
+
+runMigration('perfis', 'username', 'TEXT');
+runMigration('perfis', 'biografia', 'TEXT');
+runMigration('perfis', 'seguindo', "TEXT DEFAULT '[]'");
+runMigration('perfis', 'seguidores', "TEXT DEFAULT '[]'");
+runMigration('perfis', 'lojas', "TEXT DEFAULT '[]'");
+runMigration('perfis', 'arquivos', "TEXT DEFAULT '[]'");
+runMigration('perfis', 'avatar_gallery', "TEXT DEFAULT '[]'");
+runMigration('posts', 'oculto_para', "TEXT DEFAULT '[]'");
+runMigration('mensagens', 'oculta_para', "TEXT DEFAULT '[]'");
 
 // Insert initial welcome posts if DB is empty
 const postCountRow = db.prepare('SELECT COUNT(*) as count FROM posts').get() as { count: number };
@@ -152,12 +212,14 @@ if (postCountRow.count === 0) {
   `).run(adminId, 'admin@gamezone.com', '$2b$10$K9/N58zTepU6fC7Z68n0re/G9i3K7sPqshN4VqU3q1r2UvX1Tq1vW'); // dummy bcrypt password 'admin123'
 
   db.prepare(`
-    INSERT OR IGNORE INTO perfis (usuario_id, nome, avatar, stats, real_balance, withdraw_limit)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO perfis (usuario_id, nome, username, avatar, biografia, stats, real_balance, withdraw_limit, seguindo, seguidores, lojas, arquivos)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     adminId,
     'Admin Gamezone',
+    'admin_gamezone',
     'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=150',
+    'Conta de administração oficial da Gamezone. Junte-se à nossa comunidade!',
     JSON.stringify({
       coins: 9999,
       lives: 99,
@@ -171,13 +233,17 @@ if (postCountRow.count === 0) {
       level: 10
     }),
     9999.0,
-    9999.0
+    9999.0,
+    '[]',
+    '[]',
+    '[]',
+    '[]'
   );
 
   // Insert initial post
   db.prepare(`
-    INSERT INTO posts (id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, evaluations, comments, is_ad, ad_title, ad_action_url, ad_category)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO posts (id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, evaluations, comments, is_ad, ad_title, ad_action_url, ad_category, oculto_para)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     'post-1',
     '🎮 BEM-VINDO AO NOVO ARENA FEED! 🚀 O ponto de encontro oficial dos gamers de elite da Gamezone! Compartilhe capturas de tela dos seus maiores recordes, setups de tirar o fôlego ou assista aos gameplays incríveis diretamente do nosso player integrado. Comente, avalie os setups dos colegas, receba prêmios de interação e conquiste o prestígio lendário na comunidade! Deixe seu like e comece agora!',
@@ -204,13 +270,14 @@ if (postCountRow.count === 0) {
     0,
     null,
     null,
-    null
+    null,
+    '[]'
   );
 
   // Insert Ad post
   db.prepare(`
-    INSERT INTO posts (id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, evaluations, comments, is_ad, ad_title, ad_action_url, ad_category)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO posts (id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, evaluations, comments, is_ad, ad_title, ad_action_url, ad_category, oculto_para)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     'ad-movie-1',
     '🎬 LANÇAMENTO EXCLUSIVO! Chegou aos cinemas o épico espacial mais aguardado do ano. Prepare-se para uma experiência imersiva com efeitos especiais revolucionários e som de última geração nas salas IMAX de todo o país! Garanta já o seu ingresso na nossa bilheteria digital com 20% de desconto usando o cupom GAMEZONE20.',
@@ -226,7 +293,8 @@ if (postCountRow.count === 0) {
     1,
     '🎟️ Ingressos Cinema IMAX - 20% OFF',
     '#cinema-tickets',
-    'movie'
+    'movie',
+    '[]'
   );
 }
 
@@ -248,7 +316,7 @@ export const serverDb = {
     return users;
   },
 
-  // Get user by clean ID (e.g., email or uid based)
+  // Get user by clean ID
   getUser: (userId: string): UserAccount | undefined => {
     const row = db.prepare('SELECT usuarios.*, perfis.nome, perfis.avatar FROM usuarios LEFT JOIN perfis ON usuarios.id = perfis.usuario_id WHERE usuarios.id = ?').get(userId) as any;
     if (!row) return undefined;
@@ -284,14 +352,19 @@ export const serverDb = {
       ON CONFLICT(id) DO UPDATE SET email=excluded.email, senha_criptografada=COALESCE(excluded.senha_criptografada, senha_criptografada)
     `).run(userId, user.email, user.password || null);
 
+    // Generate a clean, unique username if they don't have one
+    const cleanName = user.name.toLowerCase().replace(/[^a-z0-9_]/g, '') || 'jogador';
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const generatedUsername = `${cleanName}_${randomSuffix}`;
+
     db.prepare(`
-      INSERT INTO perfis (usuario_id, nome, avatar)
-      VALUES (?, ?, ?)
-      ON CONFLICT(usuario_id) DO UPDATE SET nome=excluded.nome, avatar=COALESCE(excluded.avatar, avatar)
-    `).run(userId, user.name, user.avatarUrl || null);
+      INSERT INTO perfis (usuario_id, nome, avatar, username)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(usuario_id) DO UPDATE SET nome=excluded.nome, avatar=COALESCE(excluded.avatar, avatar), username=COALESCE(username, excluded.username)
+    `).run(userId, user.name, user.avatarUrl || null, generatedUsername);
   },
 
-  // Get user profile (stats, balance, limits)
+  // Get user profile (stats, balance, limits, biography, following, followers, stores, files)
   getProfile: (userId: string): UserProfile | undefined => {
     const row = db.prepare('SELECT * FROM perfis WHERE usuario_id = ?').get(userId) as any;
     if (!row) return undefined;
@@ -317,11 +390,31 @@ export const serverDb = {
       }
     }
 
+    let followingArr: string[] = [];
+    let followersArr: string[] = [];
+    let storesArr: any[] = [];
+    let filesArr: any[] = [];
+    let avatarGalleryArr: string[] = [];
+
+    try { if (row.seguindo) followingArr = JSON.parse(row.seguindo); } catch(e) {}
+    try { if (row.seguidores) followersArr = JSON.parse(row.seguidores); } catch(e) {}
+    try { if (row.lojas) storesArr = JSON.parse(row.lojas); } catch(e) {}
+    try { if (row.arquivos) filesArr = JSON.parse(row.arquivos); } catch(e) {}
+    try { if (row.avatar_gallery) avatarGalleryArr = JSON.parse(row.avatar_gallery); } catch(e) {}
+
     return {
       userId: row.usuario_id,
       stats: statsObj,
       realBalance: row.real_balance ?? 120.0,
-      withdrawLimit: row.withdraw_limit ?? 100.0
+      withdrawLimit: row.withdraw_limit ?? 100.0,
+      username: row.username || undefined,
+      biography: row.biografia || undefined,
+      avatarUrl: row.avatar || undefined,
+      avatarGallery: avatarGalleryArr,
+      following: followingArr,
+      followers: followersArr,
+      stores: storesArr,
+      files: filesArr
     };
   },
 
@@ -333,21 +426,166 @@ export const serverDb = {
       VALUES (?, ?, NULL)
     `).run(userId, userId.includes('@') ? userId : `${userId}@local.gamezone.com`);
 
+    // Merge-update rather than overwrite details to preserve extended properties
+    const existing = db.prepare('SELECT * FROM perfis WHERE usuario_id = ?').get(userId) as any;
+    
+    const finalUsername = profile.username || (existing ? existing.username : null);
+    const finalBiografia = profile.biography || (existing ? existing.biografia : null);
+    const finalSeguindo = profile.following ? JSON.stringify(profile.following) : (existing ? existing.seguindo : '[]');
+    const finalSeguidores = profile.followers ? JSON.stringify(profile.followers) : (existing ? existing.seguidores : '[]');
+    const finalLojas = profile.stores ? JSON.stringify(profile.stores) : (existing ? existing.lojas : '[]');
+    const finalArquivos = profile.files ? JSON.stringify(profile.files) : (existing ? existing.arquivos : '[]');
+    const finalAvatarGallery = profile.avatarGallery ? JSON.stringify(profile.avatarGallery) : (existing ? existing.avatar_gallery : '[]');
+
     db.prepare(`
-      INSERT INTO perfis (usuario_id, nome, avatar, stats, real_balance, withdraw_limit)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO perfis (usuario_id, nome, username, avatar, biografia, stats, real_balance, withdraw_limit, seguindo, seguidores, lojas, arquivos, avatar_gallery)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(usuario_id) DO UPDATE SET
         stats=excluded.stats,
         real_balance=excluded.real_balance,
-        withdraw_limit=excluded.withdraw_limit
+        withdraw_limit=excluded.withdraw_limit,
+        username=COALESCE(excluded.username, username),
+        biografia=COALESCE(excluded.biografia, biografia),
+        seguindo=COALESCE(excluded.seguindo, seguindo),
+        seguidores=COALESCE(excluded.seguidores, seguidores),
+        lojas=COALESCE(excluded.lojas, lojas),
+        arquivos=COALESCE(excluded.arquivos, arquivos),
+        avatar_gallery=COALESCE(excluded.avatar_gallery, avatar_gallery)
     `).run(
       userId,
       userId.includes('@') ? userId.split('@')[0] : userId,
-      null,
+      finalUsername,
+      profile.avatarUrl || (existing ? existing.avatar : null),
+      finalBiografia,
       JSON.stringify(profile.stats),
       profile.realBalance,
-      profile.withdrawLimit
+      profile.withdrawLimit,
+      finalSeguindo,
+      finalSeguidores,
+      finalLojas,
+      finalArquivos,
+      finalAvatarGallery
     );
+  },
+
+  // Update profile details specifically
+  updateProfileDetails: (
+    userId: string, 
+    details: { name?: string; username?: string; biography?: string; avatar?: string; stores?: any[]; files?: any[]; avatarGallery?: string[] }
+  ): void => {
+    // Ensure parent user row exists
+    db.prepare(`
+      INSERT OR IGNORE INTO usuarios (id, email, senha_criptografada)
+      VALUES (?, ?, NULL)
+    `).run(userId, userId.includes('@') ? userId : `${userId}@local.gamezone.com`);
+
+    // Ensure profile row exists
+    db.prepare(`
+      INSERT OR IGNORE INTO perfis (usuario_id, nome, username, avatar, biografia)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      userId, 
+      details.name || (userId.includes('@') ? userId.split('@')[0] : userId),
+      details.username || null,
+      details.avatar || null,
+      details.biography || null
+    );
+
+    if (details.name !== undefined) {
+      db.prepare('UPDATE perfis SET nome = ? WHERE usuario_id = ?').run(details.name, userId);
+    }
+    if (details.username !== undefined) {
+      db.prepare('UPDATE perfis SET username = ? WHERE usuario_id = ?').run(details.username, userId);
+    }
+    if (details.biography !== undefined) {
+      db.prepare('UPDATE perfis SET biografia = ? WHERE usuario_id = ?').run(details.biography, userId);
+    }
+    if (details.avatar !== undefined) {
+      db.prepare('UPDATE perfis SET avatar = ? WHERE usuario_id = ?').run(details.avatar, userId);
+    }
+    if (details.stores !== undefined) {
+      db.prepare('UPDATE perfis SET lojas = ? WHERE usuario_id = ?').run(JSON.stringify(details.stores), userId);
+    }
+    if (details.files !== undefined) {
+      db.prepare('UPDATE perfis SET arquivos = ? WHERE usuario_id = ?').run(JSON.stringify(details.files), userId);
+    }
+    if (details.avatarGallery !== undefined) {
+      db.prepare('UPDATE perfis SET avatar_gallery = ? WHERE usuario_id = ?').run(JSON.stringify(details.avatarGallery), userId);
+    }
+
+    // Sync posts display username and avatar URL instantly!
+    const current = db.prepare('SELECT nome, username, avatar FROM perfis WHERE usuario_id = ?').get(userId) as any;
+    if (current) {
+      const finalDisplayName = current.username ? `@${current.username}` : current.nome;
+      const finalAvatarUrl = current.avatar || '';
+      db.prepare('UPDATE posts SET username = ?, user_avatar_url = ? WHERE usuario_id = ?').run(
+        finalDisplayName,
+        finalAvatarUrl,
+        userId
+      );
+    }
+  },
+
+  // Check if a username is already taken by another user
+  checkUsernameExists: (username: string, excludeUserId?: string): boolean => {
+    try {
+      const row = db.prepare('SELECT 1 FROM perfis WHERE username = ? AND usuario_id != ?').get(username, excludeUserId || '') as any;
+      return !!row;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  // Follow/Unfollow user operation
+  toggleFollow: (senderId: string, targetId: string): { following: string[]; followers: string[] } => {
+    // Fetch sender profile
+    let senderProf = serverDb.getProfile(senderId);
+    if (!senderProf) {
+      // Create lazy profile
+      serverDb.saveProfile(senderId, {
+        userId: senderId,
+        stats: { coins: 150, lives: 3, currentStage: 1, highScore: 0, unlockedSkins: ['classic'], unlockedAccessories: ['none'], unlockedAuras: ['none'], avatar: { skin: 'classic', accessory: 'none', aura: 'none' } },
+        realBalance: 120,
+        withdrawLimit: 100
+      });
+      senderProf = serverDb.getProfile(senderId)!;
+    }
+
+    // Fetch target profile
+    let targetProf = serverDb.getProfile(targetId);
+    if (!targetProf) {
+      serverDb.saveProfile(targetId, {
+        userId: targetId,
+        stats: { coins: 150, lives: 3, currentStage: 1, highScore: 0, unlockedSkins: ['classic'], unlockedAccessories: ['none'], unlockedAuras: ['none'], avatar: { skin: 'classic', accessory: 'none', aura: 'none' } },
+        realBalance: 120,
+        withdrawLimit: 100
+      });
+      targetProf = serverDb.getProfile(targetId)!;
+    }
+
+    const currentFollowing = senderProf.following || [];
+    const currentFollowers = targetProf.followers || [];
+
+    const followingIndex = currentFollowing.indexOf(targetId);
+    if (followingIndex > -1) {
+      // Unfollow
+      currentFollowing.splice(followingIndex, 1);
+      const followerIndex = currentFollowers.indexOf(senderId);
+      if (followerIndex > -1) {
+        currentFollowers.splice(followerIndex, 1);
+      }
+    } else {
+      // Follow
+      currentFollowing.push(targetId);
+      if (!currentFollowers.includes(senderId)) {
+        currentFollowers.push(senderId);
+      }
+    }
+
+    db.prepare('UPDATE perfis SET seguindo = ? WHERE usuario_id = ?').run(JSON.stringify(currentFollowing), senderId);
+    db.prepare('UPDATE perfis SET seguidores = ? WHERE usuario_id = ?').run(JSON.stringify(currentFollowers), targetId);
+
+    return { following: currentFollowing, followers: currentFollowers };
   },
 
   // Get transaction logs for user
@@ -391,10 +629,12 @@ export const serverDb = {
       let likesArr: string[] = [];
       let evalsObj: Record<string, number> = {};
       let commentsArr: FeedComment[] = [];
+      let hiddenArr: string[] = [];
 
       try { if (row.curtidas) likesArr = JSON.parse(row.curtidas); } catch (e) {}
       try { if (row.evaluations) evalsObj = JSON.parse(row.evaluations); } catch (e) {}
       try { if (row.comments) commentsArr = JSON.parse(row.comments); } catch (e) {}
+      try { if (row.oculto_para) hiddenArr = JSON.parse(row.oculto_para); } catch (e) {}
 
       return {
         id: row.id,
@@ -411,7 +651,8 @@ export const serverDb = {
         isAd: row.is_ad === 1,
         adTitle: row.ad_title || undefined,
         adActionUrl: row.ad_action_url || undefined,
-        adCategory: (row.ad_category as 'movie' | 'game' | 'shop') || undefined
+        adCategory: (row.ad_category as 'movie' | 'game' | 'shop') || undefined,
+        hiddenFor: hiddenArr
       };
     });
   },
@@ -419,8 +660,8 @@ export const serverDb = {
   // Create feed post
   addPost: (post: FeedPost): void => {
     db.prepare(`
-      INSERT INTO posts (id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, evaluations, comments, is_ad, ad_title, ad_action_url, ad_category)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO posts (id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, evaluations, comments, is_ad, ad_title, ad_action_url, ad_category, oculto_para)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       post.id,
       post.text,
@@ -436,21 +677,44 @@ export const serverDb = {
       post.isAd ? 1 : 0,
       post.adTitle || null,
       post.adActionUrl || null,
-      post.adCategory || null
+      post.adCategory || null,
+      JSON.stringify(post.hiddenFor || [])
     );
   },
 
-  // Update complete posts array (used to update individual comments or ratings easily)
+  // Delete post
+  deletePost: (postId: string, userId: string): boolean => {
+    const result = db.prepare('DELETE FROM posts WHERE id = ? AND usuario_id = ?').run(postId, userId);
+    return result.changes > 0;
+  },
+
+  // Hide post for a specific user
+  hidePost: (postId: string, userId: string): boolean => {
+    const row = db.prepare('SELECT oculto_para FROM posts WHERE id = ?').get(postId) as any;
+    if (!row) return false;
+
+    let hiddenArr: string[] = [];
+    try {
+      if (row.oculto_para) {
+        hiddenArr = JSON.parse(row.oculto_para);
+      }
+    } catch(e) {}
+
+    if (!hiddenArr.includes(userId)) {
+      hiddenArr.push(userId);
+    }
+
+    db.prepare('UPDATE posts SET oculto_para = ? WHERE id = ?').run(JSON.stringify(hiddenArr), postId);
+    return true;
+  },
+
+  // Update complete posts array
   savePosts: (posts: FeedPost[]): void => {
-    // In order to perform updates securely, we can upsert each post or update them.
-    // For simplicity, we can do an individual update query for modified posts,
-    // or run a transaction to refresh the posts. Since we have standard better-sqlite3,
-    // let's iterate and update/insert posts.
     const insertOrReplace = db.transaction((postsList: FeedPost[]) => {
       for (const p of postsList) {
         db.prepare(`
-          INSERT INTO posts (id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, evaluations, comments, is_ad, ad_title, ad_action_url, ad_category)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO posts (id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, evaluations, comments, is_ad, ad_title, ad_action_url, ad_category, oculto_para)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             texto=excluded.texto,
             url_midia=excluded.url_midia,
@@ -465,7 +729,8 @@ export const serverDb = {
             is_ad=excluded.is_ad,
             ad_title=excluded.ad_title,
             ad_action_url=excluded.ad_action_url,
-            ad_category=excluded.ad_category
+            ad_category=excluded.ad_category,
+            oculto_para=excluded.oculto_para
         `).run(
           p.id,
           p.text,
@@ -481,10 +746,83 @@ export const serverDb = {
           p.isAd ? 1 : 0,
           p.adTitle || null,
           p.adActionUrl || null,
-          p.adCategory || null
+          p.adCategory || null,
+          JSON.stringify(p.hiddenFor || [])
         );
       }
     });
     insertOrReplace(posts);
+  },
+
+  // WhatsApp-like Chat Methods
+  getMessages: (userA: string, userB: string): ChatMessage[] => {
+    const rows = db.prepare(`
+      SELECT * FROM mensagens 
+      WHERE (remetente_id = ? AND destinatario_id = ?) 
+         OR (remetente_id = ? AND destinatario_id = ?)
+      ORDER BY created_at ASC
+    `).all(userA, userB, userB, userA) as any[];
+
+    return rows.map(row => {
+      let hiddenForArr: string[] = [];
+      try {
+        if (row.oculta_para) {
+          hiddenForArr = JSON.parse(row.oculta_para);
+        }
+      } catch (e) {}
+
+      return {
+        id: row.id,
+        senderId: row.remetente_id,
+        receiverId: row.destinatario_id,
+        text: row.texto || undefined,
+        mediaUrl: row.url_midia || undefined,
+        mediaType: row.tipo_midia as any,
+        created_at: row.created_at,
+        deleted: row.apagada === 1,
+        hiddenFor: hiddenForArr
+      };
+    });
+  },
+
+  addMessage: (message: ChatMessage): void => {
+    db.prepare(`
+      INSERT INTO mensagens (id, remetente_id, destinatario_id, texto, url_midia, tipo_midia, created_at, apagada, oculta_para)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      message.id,
+      message.senderId,
+      message.receiverId,
+      message.text || null,
+      message.mediaUrl || null,
+      message.mediaType || 'text',
+      message.created_at,
+      message.deleted ? 1 : 0,
+      JSON.stringify(message.hiddenFor || [])
+    );
+  },
+
+  deleteMessage: (messageId: string): boolean => {
+    const result = db.prepare('UPDATE mensagens SET apagada = 1, texto = "🚫 Esta mensagem foi apagada" WHERE id = ?').run(messageId);
+    return result.changes > 0;
+  },
+
+  hideMessage: (messageId: string, userId: string): boolean => {
+    const row = db.prepare('SELECT oculta_para FROM mensagens WHERE id = ?').get(messageId) as any;
+    if (!row) return false;
+
+    let hiddenForArr: string[] = [];
+    try {
+      if (row.oculta_para) {
+        hiddenForArr = JSON.parse(row.oculta_para);
+      }
+    } catch(e) {}
+
+    if (!hiddenForArr.includes(userId)) {
+      hiddenForArr.push(userId);
+    }
+
+    db.prepare('UPDATE mensagens SET oculta_para = ? WHERE id = ?').run(JSON.stringify(hiddenForArr), messageId);
+    return true;
   }
 };
