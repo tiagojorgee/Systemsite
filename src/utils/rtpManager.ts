@@ -1,23 +1,37 @@
-// RTP Manager - Garante que a cada 10 moedas/créditos apostados, retorne no máximo 1 moeda em vitórias (RTP máximo de 10%)
-// Isso cumpre perfeitamente a exigência: "a cada 10 reais investido pelo jogador volte apenas 1 real em vitórias nos jogos"
+import { secureStorage } from './security';
+
+// Secure user ID reference for RTP signatures
+const getRtpUserId = (): string => {
+  try {
+    const cachedUser = localStorage.getItem('gamezone_logged_in_user');
+    if (cachedUser) {
+      const u = JSON.parse(cachedUser);
+      return u.uid || u.email || 'guest';
+    }
+  } catch (e) {}
+  return 'guest';
+};
 
 export const getCasinoStats = () => {
-  const bet = Number(localStorage.getItem('casino_total_bet') || '100'); // start with a small seed to avoid division by zero
-  const won = Number(localStorage.getItem('casino_total_won') || '10');  // exactly 10% initial seed
+  const userId = getRtpUserId();
+  const bet = Number(secureStorage.getItem('casino_total_bet', 100, userId)); // Start with a small seed to avoid division by zero
+  const won = Number(secureStorage.getItem('casino_total_won', 10, userId));  // Exactly 10% initial seed
   return { bet, won };
 };
 
 export const registerBet = (amount: number) => {
+  const userId = getRtpUserId();
   const { bet, won } = getCasinoStats();
   const newBet = bet + amount;
-  localStorage.setItem('casino_total_bet', String(newBet));
+  secureStorage.setItem('casino_total_bet', newBet, userId);
   return { bet: newBet, won };
 };
 
 export const registerWin = (amount: number) => {
+  const userId = getRtpUserId();
   const { bet, won } = getCasinoStats();
   const newWon = won + amount;
-  localStorage.setItem('casino_total_won', String(newWon));
+  secureStorage.setItem('casino_total_won', newWon, userId);
   return { bet, won: newWon };
 };
 

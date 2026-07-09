@@ -10,6 +10,7 @@ import { getLevelForPoints, SKIN_LEVELS, ACCESSORY_LEVELS, AURA_LEVELS } from '.
 import { AuthModal, AppUser } from './components/AuthModal';
 import { googleSignOut } from './utils/googleDriveDb';
 import { getCleanUserId, getUserProfile, saveUserProfile, getUserLogs, addUserLog } from './utils/firebaseDb';
+import { secureStorage } from './utils/security';
 
 // Dynamic Lazy Loaded Sub-Views for optimal on-demand rendering
 const GamePortal = lazy(() => import('./components/GamePortal').then(m => ({ default: m.GamePortal })));
@@ -106,9 +107,8 @@ export default function App() {
   // App-level Toast notifications
   const [appToast, setAppToast] = useState<string | null>(null);
 
-  // Initialize state with default values or localStorage
+  // Initialize state with default values or localStorage securely with integrity checks
   const [stats, setStats] = useState<PlayerStats>(() => {
-    const cached = localStorage.getItem('gamezone_player_stats');
     const defaultStats = {
       coins: 150, // Starts with a small bonus of 150 coins to test the customizer immediately!
       lives: 3,
@@ -125,20 +125,18 @@ export default function App() {
       points: 0,
       level: 1
     };
-    if (cached) {
+    
+    // Get logged-in user id or guest
+    let userId = 'guest';
+    const cachedUser = localStorage.getItem('gamezone_logged_in_user');
+    if (cachedUser) {
       try {
-        const parsed = JSON.parse(cached);
-        return {
-          ...defaultStats,
-          ...parsed,
-          points: parsed.points ?? 0,
-          level: parsed.level ?? 1
-        };
-      } catch (e) {
-        console.error('Error parsing cached player stats:', e);
-      }
+        const u = JSON.parse(cachedUser);
+        userId = u.uid || u.email || 'guest';
+      } catch (e) {}
     }
-    return defaultStats;
+
+    return secureStorage.getItem('gamezone_player_stats', defaultStats, userId);
   });
 
   // Intercept stats updates to handle point awards and level-up events
@@ -211,38 +209,43 @@ export default function App() {
     });
   };
 
-  // Lifted financial states for synchronization and monetization headers
+  // Lifted financial states securely loaded with signature validation
   const [realBalance, setRealBalance] = useState<number>(() => {
-    const cached = localStorage.getItem('gamezone_real_balance');
-    return cached ? parseFloat(cached) : 120.00; // default initial simulated balance of R$ 120
+    let userId = 'guest';
+    const cachedUser = localStorage.getItem('gamezone_logged_in_user');
+    if (cachedUser) {
+      try {
+        const u = JSON.parse(cachedUser);
+        userId = u.uid || u.email || 'guest';
+      } catch (e) {}
+    }
+    return secureStorage.getItem('gamezone_real_balance', 120.00, userId);
   });
 
   const [withdrawLimit, setWithdrawLimit] = useState<number>(() => {
-    const cached = localStorage.getItem('gamezone_withdraw_limit');
-    return cached ? parseFloat(cached) : 100.00; // default initial withdrawal limit
+    let userId = 'guest';
+    const cachedUser = localStorage.getItem('gamezone_logged_in_user');
+    if (cachedUser) {
+      try {
+        const u = JSON.parse(cachedUser);
+        userId = u.uid || u.email || 'guest';
+      } catch (e) {}
+    }
+    return secureStorage.getItem('gamezone_withdraw_limit', 100.00, userId);
   });
 
-  // Synchronize financial localStorage
-  useEffect(() => {
-    localStorage.setItem('gamezone_real_balance', realBalance.toFixed(2));
-  }, [realBalance]);
-
-  useEffect(() => {
-    localStorage.setItem('gamezone_withdraw_limit', withdrawLimit.toFixed(2));
-  }, [withdrawLimit]);
-
   const [logs, setLogs] = useState<TransactionLog[]>(() => {
-    const cached = localStorage.getItem('gamezone_transaction_logs');
-    if (cached) {
+    let userId = 'guest';
+    const cachedUser = localStorage.getItem('gamezone_logged_in_user');
+    if (cachedUser) {
       try {
-        return JSON.parse(cached);
-      } catch (e) {
-        console.error('Error parsing cached logs:', e);
-      }
+        const u = JSON.parse(cachedUser);
+        userId = u.uid || u.email || 'guest';
+      } catch (e) {}
     }
-    // Return initial default logs to look rich
+
     const initialHash = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-    return [
+    const defaultLogs: TransactionLog[] = [
       {
         id: 'TXN-INITIAL-001',
         timestamp: new Date().toLocaleString('pt-BR'),
@@ -254,9 +257,66 @@ export default function App() {
         securityHash: `0x${initialHash}`
       }
     ];
+
+    return secureStorage.getItem('gamezone_transaction_logs', defaultLogs, userId);
   });
 
   const [isDbLoading, setIsDbLoading] = useState<boolean>(false);
+
+  // Securely save changes whenever stats, realBalance, withdrawLimit, or logs update
+  useEffect(() => {
+    let userId = 'guest';
+    if (loggedInUser) {
+      userId = loggedInUser.uid || loggedInUser.email || 'guest';
+    }
+    secureStorage.setItem('gamezone_player_stats', stats, userId);
+  }, [stats, loggedInUser]);
+
+  useEffect(() => {
+    let userId = 'guest';
+    if (loggedInUser) {
+      userId = loggedInUser.uid || loggedInUser.email || 'guest';
+    }
+    secureStorage.setItem('gamezone_real_balance', realBalance, userId);
+  }, [realBalance, loggedInUser]);
+
+  useEffect(() => {
+    let userId = 'guest';
+    if (loggedInUser) {
+      userId = loggedInUser.uid || loggedInUser.email || 'guest';
+    }
+    secureStorage.setItem('gamezone_withdraw_limit', withdrawLimit, userId);
+  }, [withdrawLimit, loggedInUser]);
+
+  useEffect(() => {
+    let userId = 'guest';
+    if (loggedInUser) {
+      userId = loggedInUser.uid || loggedInUser.email || 'guest';
+    }
+    secureStorage.setItem('gamezone_transaction_logs', logs, userId);
+  }, [logs, loggedInUser]);
+
+  // Run initial state integrity audit upon app start
+  useEffect(() => {
+    let userId = 'guest';
+    if (loggedInUser) {
+      userId = loggedInUser.uid || loggedInUser.email || 'guest';
+    }
+    
+    // Check for tempering and self-heal automatically
+    const corrected = secureStorage.auditStateIntegrity(userId, (warningMsg) => {
+      triggerToast(warningMsg);
+    });
+
+    if (corrected) {
+      // Reload stats and balance if repaired
+      const repairedStats = secureStorage.getItem('gamezone_player_stats', null, userId);
+      if (repairedStats) setStats(repairedStats);
+      setRealBalance(secureStorage.getItem('gamezone_real_balance', 120.00, userId));
+      setWithdrawLimit(secureStorage.getItem('gamezone_withdraw_limit', 100.00, userId));
+      setLogs(secureStorage.getItem('gamezone_transaction_logs', [], userId));
+    }
+  }, [loggedInUser]);
 
   // Load stats and logs from Firestore upon successful login
   useEffect(() => {
@@ -292,15 +352,6 @@ export default function App() {
       }
     }
   }, [loggedInUser]);
-
-  // Save changes to localStorage for state preservation
-  useEffect(() => {
-    localStorage.setItem('gamezone_player_stats', JSON.stringify(stats));
-  }, [stats]);
-
-  useEffect(() => {
-    localStorage.setItem('gamezone_transaction_logs', JSON.stringify(logs));
-  }, [logs]);
 
   // Auto-save stats to Firestore on updates if logged in and not loading
   useEffect(() => {
