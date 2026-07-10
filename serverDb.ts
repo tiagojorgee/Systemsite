@@ -827,6 +827,69 @@ runMigration('perfis', 'reputacao_votos', "TEXT DEFAULT '{}'");
 runMigration('posts', 'oculto_para', "TEXT DEFAULT '[]'");
 runMigration('mensagens', 'oculta_para', "TEXT DEFAULT '[]'");
 
+// --- ADVANCED E-COMMERCE / MARKETPLACE ENTERPRISE MIGRATIONS ---
+runMigration('normalized_marketplace', 'custom_url', "TEXT");
+runMigration('normalized_marketplace', 'logo_url', "TEXT");
+runMigration('normalized_marketplace', 'banner_url', "TEXT");
+runMigration('normalized_marketplace', 'theme', "TEXT DEFAULT 'default'");
+runMigration('normalized_marketplace', 'description', "TEXT");
+runMigration('normalized_marketplace', 'categories', "TEXT DEFAULT '[]'");
+runMigration('normalized_marketplace', 'reputation', "REAL DEFAULT 5.0");
+
+runMigration('normalized_products', 'type', "TEXT DEFAULT 'physical'");
+runMigration('normalized_products', 'stock', "INTEGER DEFAULT 10");
+runMigration('normalized_products', 'variations', "TEXT DEFAULT '[]'");
+runMigration('normalized_products', 'sku', "TEXT");
+runMigration('normalized_products', 'images', "TEXT DEFAULT '[]'");
+runMigration('normalized_products', 'video_url', "TEXT");
+runMigration('normalized_products', 'digital_file_url', "TEXT");
+runMigration('normalized_products', 'subscription_plan', "TEXT DEFAULT '{}'");
+
+runMigration('normalized_orders', 'quantity', "INTEGER DEFAULT 1");
+runMigration('normalized_orders', 'shipping_address', "TEXT");
+runMigration('normalized_orders', 'shipping_tracking_code', "TEXT");
+runMigration('normalized_orders', 'variation_selected', "TEXT");
+
+// Create reviews, questions, wishlist tables if they don't exist
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS normalized_reviews (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    rating INTEGER NOT NULL,
+    comment TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES normalized_users(id) ON DELETE CASCADE,
+    FOREIGN KEY(product_id) REFERENCES normalized_products(id) ON DELETE CASCADE
+  );
+`).run();
+
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS normalized_questions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT,
+    answered_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES normalized_users(id) ON DELETE CASCADE,
+    FOREIGN KEY(product_id) REFERENCES normalized_products(id) ON DELETE CASCADE
+  );
+`).run();
+
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS normalized_wishlist (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES normalized_users(id) ON DELETE CASCADE,
+    FOREIGN KEY(product_id) REFERENCES normalized_products(id) ON DELETE CASCADE,
+    UNIQUE(user_id, product_id)
+  );
+`).run();
+
 // Insert initial welcome posts if DB is empty
 const postCountRow = db.prepare('SELECT COUNT(*) as count FROM posts').get() as { count: number };
 if (postCountRow.count === 0) {
