@@ -83,10 +83,17 @@ export interface ChatMessage {
   receiverId: string;
   text?: string;
   mediaUrl?: string;
-  mediaType?: 'text' | 'image' | 'audio';
+  mediaType?: 'text' | 'image' | 'audio' | 'video' | 'file' | 'gif' | 'sticker';
   created_at: string;
   deleted: boolean;
   hiddenFor: string[]; // Array of user_ids who hid this message
+  reply_to_id?: string;
+  reactions?: string; // JSON string of reactions: Array<{ userId: string, emoji: string, userName: string }>
+  pinned?: boolean;
+  is_encrypted?: boolean;
+  expires_at?: string;
+  group_id?: string;
+  is_channel?: boolean;
 }
 
 export interface TransactionLog {
@@ -1077,6 +1084,24 @@ for (const q of alterQueries) {
   }
 }
 
+// Table migrations for messages in SQLite
+const alterMessagesQueries = [
+  "ALTER TABLE mensagens ADD COLUMN reply_to_id TEXT;",
+  "ALTER TABLE mensagens ADD COLUMN reactions TEXT DEFAULT '[]';",
+  "ALTER TABLE mensagens ADD COLUMN pinned INTEGER DEFAULT 0;",
+  "ALTER TABLE mensagens ADD COLUMN is_encrypted INTEGER DEFAULT 0;",
+  "ALTER TABLE mensagens ADD COLUMN expires_at TEXT;",
+  "ALTER TABLE mensagens ADD COLUMN group_id TEXT;",
+  "ALTER TABLE mensagens ADD COLUMN is_channel INTEGER DEFAULT 0;"
+];
+for (const q of alterMessagesQueries) {
+  try {
+    db.prepare(q).run();
+  } catch (e) {
+    // Column might already exist, safe to ignore
+  }
+}
+
 // Seed coupons if empty
 const couponCountRow = db.prepare('SELECT COUNT(*) as count FROM payment_coupons').get() as { count: number };
 if (couponCountRow.count === 0) {
@@ -1847,8 +1872,9 @@ export const serverDb = {
   getMessages: (userA: string, userB: string): ChatMessage[] => {
     const rows = db.prepare(`
       SELECT * FROM mensagens 
-      WHERE (remetente_id = ? AND destinatario_id = ?) 
-         OR (remetente_id = ? AND destinatario_id = ?)
+      WHERE ((remetente_id = ? AND destinatario_id = ?) 
+         OR (remetente_id = ? AND destinatario_id = ?))
+         AND (group_id IS NULL OR group_id = '')
       ORDER BY created_at ASC
     `).all(userA, userB, userB, userA) as any[];
 
@@ -1869,7 +1895,50 @@ export const serverDb = {
         mediaType: row.tipo_midia as any,
         created_at: row.created_at,
         deleted: row.apagada === 1,
-        hiddenFor: hiddenForArr
+        hiddenFor: hiddenForArr,
+        reply_to_id: row.reply_to_id || undefined,
+        reactions: row.reactions || '[]',
+        pinned: row.pinned === 1,
+        is_encrypted: row.is_encrypted === 1,
+        expires_at: row.expires_at || undefined,
+        group_id: row.group_id || undefined,
+        is_channel: row.is_channel === 1
+      };
+    });
+  },
+
+  getGroupMessages: (groupId: string): ChatMessage[] => {
+    const rows = db.prepare(`
+      SELECT * FROM mensagens 
+      WHERE group_id = ?
+      ORDER BY created_at ASC
+    `).all(groupId) as any[];
+
+    return rows.map(row => {
+      let hiddenForArr: string[] = [];
+      try {
+        if (row.oculta_para) {
+          hiddenForArr = JSON.parse(row.oculta_para);
+        }
+      } catch (e) {}
+
+      return {
+        id: row.id,
+        senderId: row.remetente_id,
+        receiverId: row.destinatario_id,
+        text: row.texto || undefined,
+        mediaUrl: row.url_midia || undefined,
+        mediaType: row.tipo_midia as any,
+        created_at: row.created_at,
+        deleted: row.apagada === 1,
+        hiddenFor: hiddenForArr,
+        reply_to_id: row.reply_to_id || undefined,
+        reactions: row.reactions || '[]',
+        pinned: row.pinned === 1,
+        is_encrypted: row.is_encrypted === 1,
+        expires_at: row.expires_at || undefined,
+        group_id: row.group_id || undefined,
+        is_channel: row.is_channel === 1
       };
     });
   },
@@ -1898,15 +1967,26 @@ export const serverDb = {
         mediaType: row.tipo_midia as any,
         created_at: row.created_at,
         deleted: row.apagada === 1,
-        hiddenFor: hiddenForArr
+        hiddenFor: hiddenForArr,
+        reply_to_id: row.reply_to_id || undefined,
+        reactions: row.reactions || '[]',
+        pinned: row.pinned === 1,
+        is_encrypted: row.is_encrypted === 1,
+        expires_at: row.expires_at || undefined,
+        group_id: row.group_id || undefined,
+        is_channel: row.is_channel === 1
       };
     });
   },
 
   addMessage: (message: ChatMessage): void => {
     db.prepare(`
-      INSERT INTO mensagens (id, remetente_id, destinatario_id, texto, url_midia, tipo_midia, created_at, apagada, oculta_para)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO mensagens (
+        id, remetente_id, destinatario_id, texto, url_midia, tipo_midia, 
+        created_at, apagada, oculta_para, reply_to_id, reactions, pinned, 
+        is_encrypted, expires_at, group_id, is_channel
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       message.id,
       message.senderId,
@@ -1916,8 +1996,41 @@ export const serverDb = {
       message.mediaType || 'text',
       message.created_at,
       message.deleted ? 1 : 0,
-      JSON.stringify(message.hiddenFor || [])
+      JSON.stringify(message.hiddenFor || []),
+      message.reply_to_id || null,
+      message.reactions || '[]',
+      message.pinned ? 1 : 0,
+      message.is_encrypted ? 1 : 0,
+      message.expires_at || null,
+      message.group_id || null,
+      message.is_channel ? 1 : 0
     );
+  },
+
+  pinMessage: (messageId: string, pinned: boolean): void => {
+    db.prepare('UPDATE mensagens SET pinned = ? WHERE id = ?').run(pinned ? 1 : 0, messageId);
+  },
+
+  reactToMessage: (messageId: string, userId: string, emoji: string, userName: string): void => {
+    const row = db.prepare('SELECT reactions FROM mensagens WHERE id = ?').get(messageId) as any;
+    if (!row) return;
+
+    let reactionsList: Array<{ userId: string; emoji: string; userName: string }> = [];
+    try {
+      if (row.reactions) {
+        reactionsList = JSON.parse(row.reactions);
+      }
+    } catch (e) {}
+
+    // Remove existing reaction of same emoji by same user if clicked again, or toggle
+    const existingIndex = reactionsList.findIndex(r => r.userId === userId && r.emoji === emoji);
+    if (existingIndex !== -1) {
+      reactionsList.splice(existingIndex, 1);
+    } else {
+      reactionsList.push({ userId, emoji, userName });
+    }
+
+    db.prepare('UPDATE mensagens SET reactions = ? WHERE id = ?').run(JSON.stringify(reactionsList), messageId);
   },
 
   deleteMessage: (messageId: string): boolean => {

@@ -7,6 +7,8 @@ import multer from "multer";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
+import http from "http";
+import { WebSocketServer, WebSocket } from "ws";
 import { serverDb } from "./serverDb";
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -39,8 +41,18 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // Limit to 10MB
   fileFilter: (req, file, cb) => {
     // Malicious Upload Protection: restriction of file extensions and MIME-types
-    const allowedExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mp3", ".mov"];
-    const allowedMimes = ["image/png", "image/jpeg", "image/gif", "image/webp", "video/mp4", "video/quicktime", "audio/mpeg", "audio/mp3", "audio/wav"];
+    const allowedExts = [
+      ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mp3", ".mov", 
+      ".pdf", ".txt", ".zip", ".rar", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"
+    ];
+    const allowedMimes = [
+      "image/png", "image/jpeg", "image/gif", "image/webp", "video/mp4", "video/quicktime", 
+      "audio/mpeg", "audio/mp3", "audio/wav", "application/pdf", "text/plain", "application/zip", 
+      "application/x-zip-compressed", "application/x-rar-compressed", "application/msword", 
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.ms-excel", 
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-powerpoint", 
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    ];
     
     const ext = path.extname(file.originalname).toLowerCase();
     const mime = file.mimetype.toLowerCase();
@@ -1769,9 +1781,9 @@ Retorne uma estrutura JSON com:
       const hashtagCounts: Record<string, number> = {};
       posts.forEach(p => {
         if (p.is_flagged) return;
-        const tags = p.text.match(/#[a-zA-Z0-9À-ÿ_]+/g) || [];
-        tags.forEach(tag => {
-          const cleanTag = tag.toLowerCase();
+        const tags = (p.text || "").match(/#[a-zA-Z0-9À-ÿ_]+/g) || [];
+        tags.forEach((tag: any) => {
+          const cleanTag = String(tag).toLowerCase();
           hashtagCounts[cleanTag] = (hashtagCounts[cleanTag] || 0) + 1;
         });
       });
@@ -2668,6 +2680,22 @@ Retorne uma estrutura JSON com:
     } catch (err: any) {
       console.error("[GET MESSAGES ERROR]", err);
       return res.status(500).json({ error: "Erro ao buscar mensagens do chat." });
+    }
+  });
+
+  // GET /api/chat/group-messages - Retrieve messages for a Group or Channel
+  app.get("/api/chat/group-messages", (req, res) => {
+    const { groupId } = req.query;
+    if (!groupId) {
+      return res.status(400).json({ error: "O parâmetro groupId é obrigatório." });
+    }
+
+    try {
+      const messages = serverDb.getGroupMessages(groupId as string);
+      return res.json({ success: true, messages });
+    } catch (err: any) {
+      console.error("[GET GROUP MESSAGES ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar mensagens do grupo." });
     }
   });
 
@@ -4411,8 +4439,221 @@ Assinatura Digital de Segurança: ${txn.securityHash}
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[SERVER] Running successfully at http://0.0.0.0:${PORT}`);
+  const httpServer = http.createServer(app);
+  const wss = new WebSocketServer({ server: httpServer });
+
+  // Map to hold connected users and their WebSockets
+  const clients = new Map<string, Set<WebSocket>>(); // userId -> Set of WS connections
+  const onlineUsers = new Map<string, string>(); // userId -> status ('online' | 'busy' | 'offline')
+
+  wss.on("connection", (ws) => {
+    let currentUserId: string | null = null;
+
+    ws.on("message", (messageRaw) => {
+      try {
+        const data = JSON.parse(messageRaw.toString());
+        const { type, payload } = data;
+
+        if (type === "register") {
+          const { userId } = payload;
+          if (userId) {
+            currentUserId = userId;
+            if (!clients.has(userId)) {
+              clients.set(userId, new Set());
+            }
+            clients.get(userId)!.add(ws);
+            onlineUsers.set(userId, "online");
+
+            // Broadcast status change to everyone
+            broadcastStatus(userId, "online");
+
+            // Send current list of online users to this connected client
+            ws.send(JSON.stringify({
+              type: "online_users",
+              payload: {
+                users: Array.from(onlineUsers.entries()).map(([uid, status]) => ({ uid, status }))
+              }
+            }));
+          }
+        }
+
+        if (type === "status_change") {
+          const { userId, status } = payload;
+          if (userId && status) {
+            onlineUsers.set(userId, status);
+            broadcastStatus(userId, status);
+          }
+        }
+
+        if (type === "typing") {
+          const { userId, targetId, targetType, isTyping } = payload;
+          if (targetType === "private") {
+            sendToUser(targetId, {
+              type: "typing",
+              payload: { userId, targetId, targetType, isTyping }
+            });
+          } else {
+            // Broadcast typing to everyone except typing user
+            broadcastToAll({
+              type: "typing",
+              payload: { userId, targetId, targetType, isTyping }
+            }, ws);
+          }
+        }
+
+        if (type === "message") {
+          const { message } = payload;
+          if (message) {
+            serverDb.addMessage(message);
+
+            if (message.group_id) {
+              // Group or Channel message: broadcast to all online users
+              broadcastToAll({
+                type: "message",
+                payload: { message }
+              });
+            } else {
+              // Direct private message
+              sendToUser(message.receiverId, {
+                type: "message",
+                payload: { message }
+              });
+              // Sync sender's other connected devices
+              sendToUser(message.senderId, {
+                type: "message",
+                payload: { message }
+              }, ws);
+            }
+          }
+        }
+
+        if (type === "reaction") {
+          const { messageId, userId, emoji, userName, targetId, isGroup } = payload;
+          if (messageId && userId && emoji) {
+            serverDb.reactToMessage(messageId, userId, emoji, userName || "Usuário");
+
+            // Broadcast reaction update to all connected users
+            broadcastToAll({
+              type: "reaction",
+              payload: { messageId, targetId, isGroup }
+            });
+          }
+        }
+
+        if (type === "pin") {
+          const { messageId, pinned, targetId, isGroup } = payload;
+          if (messageId) {
+            serverDb.pinMessage(messageId, !!pinned);
+
+            broadcastToAll({
+              type: "pin",
+              payload: { messageId, pinned, targetId, isGroup }
+            });
+          }
+        }
+
+        if (type === "delete") {
+          const { messageId, targetId, isGroup } = payload;
+          if (messageId) {
+            serverDb.deleteMessage(messageId);
+
+            broadcastToAll({
+              type: "delete",
+              payload: { messageId, targetId, isGroup }
+            });
+          }
+        }
+
+        // --- Live VOICE & VIDEO CALL signaling endpoints ---
+        if (type === "call:offer") {
+          const { senderId, receiverId, callType, senderName, senderAvatar } = payload;
+          sendToUser(receiverId, {
+            type: "call:offer",
+            payload: { senderId, receiverId, callType, senderName, senderAvatar }
+          });
+        }
+
+        if (type === "call:answer") {
+          const { senderId, receiverId, accepted } = payload;
+          sendToUser(senderId, {
+            type: "call:answer",
+            payload: { senderId, receiverId, accepted }
+          });
+        }
+
+        if (type === "call:hangup") {
+          const { senderId, receiverId } = payload;
+          sendToUser(receiverId, {
+            type: "call:hangup",
+            payload: { senderId, receiverId }
+          });
+          sendToUser(senderId, {
+            type: "call:hangup",
+            payload: { senderId, receiverId }
+          });
+        }
+
+      } catch (err) {
+        console.error("[WS MESSAGE PROCESS ERROR]", err);
+      }
+    });
+
+    ws.on("close", () => {
+      if (currentUserId) {
+        const userConnections = clients.get(currentUserId);
+        if (userConnections) {
+          userConnections.delete(ws);
+          if (userConnections.size === 0) {
+            clients.delete(currentUserId);
+            onlineUsers.delete(currentUserId);
+            // Notify other clients about offline state
+            broadcastStatus(currentUserId, "offline");
+          }
+        }
+      }
+    });
+  });
+
+  // Helper functions for WS delivery
+  function sendToUser(userId: string, data: any, excludeWs?: WebSocket) {
+    const userConnections = clients.get(userId);
+    if (userConnections) {
+      const msg = JSON.stringify(data);
+      for (const conn of userConnections) {
+        if (conn !== excludeWs && conn.readyState === WebSocket.OPEN) {
+          conn.send(msg);
+        }
+      }
+    }
+  }
+
+  function broadcastStatus(userId: string, status: string) {
+    const data = JSON.stringify({
+      type: "status_change",
+      payload: { userId, status }
+    });
+    for (const [uid, userConnections] of clients.entries()) {
+      for (const conn of userConnections) {
+        if (conn.readyState === WebSocket.OPEN) {
+          conn.send(data);
+        }
+      }
+    }
+  }
+
+  function broadcastToAll(data: any, excludeWs?: WebSocket) {
+    const msg = JSON.stringify(data);
+    for (const [uid, userConnections] of clients.entries()) {
+      for (const conn of userConnections) {
+        if (conn !== excludeWs && conn.readyState === WebSocket.OPEN) {
+          conn.send(msg);
+        }
+      }
+    }
+  }
+
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`[SERVER] Full-Stack Real-Time and WS Engine running at http://0.0.0.0:${PORT}`);
   });
 }
 
