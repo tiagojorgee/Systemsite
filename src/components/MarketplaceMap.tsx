@@ -563,7 +563,29 @@ export const MarketplaceMap: React.FC<MarketplaceMapProps> = ({
       createdAt: new Date().toISOString()
     };
 
+    const updatedStore = {
+      ...currentUserStore,
+      products: [newProd, ...(currentUserStore.products || [])]
+    };
+
     setProducts(prev => [newProd, ...prev]);
+
+    // Persist to SQLite
+    fetch('/api/user/profile/details', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        userId: loggedInUser.uid || loggedInUser.email,
+        stores: [updatedStore]
+      })
+    }).then(() => {
+      fetchMarketplaceStores();
+    }).catch(err => {
+      console.error('Error updating store products in backend:', err);
+    });
+
     playSound.purchase();
     setProdFormSuccess('🚀 Produto de afiliado adicionado à sua loja com sucesso!');
     setProdFormError(null);
@@ -585,8 +607,29 @@ export const MarketplaceMap: React.FC<MarketplaceMapProps> = ({
   const handleDeleteAffProduct = (prodId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     playSound.click();
+    if (!currentUserStore) return;
     if (confirm('Deseja realmente remover este produto da sua vitrine de afiliado?')) {
+      const updatedStore = {
+        ...currentUserStore,
+        products: (currentUserStore.products || []).filter(p => p.id !== prodId)
+      };
+
       setProducts(prev => prev.filter(p => p.id !== prodId));
+
+      fetch('/api/user/profile/details', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: loggedInUser.uid || loggedInUser.email,
+          stores: [updatedStore]
+        })
+      }).then(() => {
+        fetchMarketplaceStores();
+      }).catch(err => {
+        console.error('Error deleting store product in backend:', err);
+      });
     }
   };
 

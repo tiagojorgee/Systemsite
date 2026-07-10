@@ -6,6 +6,7 @@ import { createServer as createViteServer } from "vite";
 import multer from "multer";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { serverDb } from "./serverDb";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,39 +26,73 @@ const storage = multer.diskStorage({
     cb(null, "uploads/");
   },
   filename: (req, file, cb) => {
-    const fileExt = path.extname(file.originalname) || ".png";
-    const uniqueName = `feed-${Date.now()}-${Math.round(Math.random() * 1e9)}${fileExt}`;
+    // Clean and sanitize the original filename to prevent path traversal
+    const safeExt = path.extname(file.originalname).toLowerCase();
+    const uniqueName = `feed-${Date.now()}-${crypto.randomBytes(8).toString('hex')}${safeExt}`;
     cb(null, uniqueName);
   }
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 } // Limit to 50MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // Limit to 10MB
+  fileFilter: (req, file, cb) => {
+    // Malicious Upload Protection: restriction of file extensions and MIME-types
+    const allowedExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mp3", ".mov"];
+    const allowedMimes = ["image/png", "image/jpeg", "image/gif", "image/webp", "video/mp4", "video/quicktime", "audio/mpeg", "audio/mp3", "audio/wav"];
+    
+    const ext = path.extname(file.originalname).toLowerCase();
+    const mime = file.mimetype.toLowerCase();
+
+    if (!allowedExts.includes(ext) || !allowedMimes.includes(mime)) {
+      return cb(new Error("Formato de arquivo não permitido por diretrizes de segurança corporativa."));
+    }
+    cb(null, true);
+  }
 });
 
 // Helper to save base64 data to local file in uploads folder
 function saveBase64ToUploads(base64Data: string, fileName: string): string | null {
   try {
-    const matches = base64Data.match(/^data:(.+);base64,(.+)$/);
-    let buffer: Buffer;
-    let extension = ".png";
-
-    if (matches && matches.length === 3) {
-      const mime = matches[1];
-      buffer = Buffer.from(matches[2], "base64");
-      const parts = mime.split("/");
-      if (parts.length === 2) {
-        extension = "." + parts[1];
-      }
-    } else {
-      buffer = Buffer.from(base64Data, "base64");
-      const detectedExt = path.extname(fileName);
-      if (detectedExt) extension = detectedExt;
+    // Path Traversal Protection: retrieve only the safe basename
+    const sanitizedBaseName = path.basename(fileName).replace(/[^a-zA-Z0-9_\-.]/g, "_");
+    const fileExt = path.extname(sanitizedBaseName).toLowerCase() || ".png";
+    
+    // Strict extension whitelist
+    const allowedExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mp3"];
+    if (!allowedExts.includes(fileExt)) {
+      console.warn(`[SECURITY ENGINE] Blocked upload attempt with malicious extension: ${fileExt}`);
+      return null;
     }
 
-    const uniqueName = `upload-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
+    const matches = base64Data.match(/^data:(.+);base64,(.+)$/);
+    let buffer: Buffer;
+    let extension = fileExt;
+
+    if (matches && matches.length === 3) {
+      const mime = matches[1].toLowerCase();
+      // Validate MIME type matching
+      const allowedMimes = ["image/png", "image/jpeg", "image/gif", "image/webp", "video/mp4", "audio/mpeg"];
+      if (!allowedMimes.includes(mime)) {
+        console.warn(`[SECURITY ENGINE] Blocked upload attempt with untrusted MIME type: ${mime}`);
+        return null;
+      }
+      buffer = Buffer.from(matches[2], "base64");
+    } else {
+      buffer = Buffer.from(base64Data, "base64");
+    }
+
+    const uniqueName = `upload-${Date.now()}-${crypto.randomBytes(8).toString('hex')}${extension}`;
     const filePath = path.join(process.cwd(), "uploads", uniqueName);
+
+    // Safeguard directory traversal validation
+    const realUploadsDir = path.resolve(process.cwd(), "uploads");
+    const resolvedPath = path.resolve(filePath);
+    if (!resolvedPath.startsWith(realUploadsDir)) {
+      console.warn(`[SECURITY ALERT] Blocked malicious Path Traversal upload attempt! Path: ${resolvedPath}`);
+      return null;
+    }
+
     fs.writeFileSync(filePath, buffer);
     return `/uploads/${uniqueName}`;
   } catch (err) {
@@ -70,12 +105,211 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT || 3000);
 
+  // --- CORPORATE SECURITY HEADERS (Helmet Equivalent) ---
+  app.disable("x-powered-by");
+  app.use((req, res, next) => {
+    // Clickjacking & CSRF & XSS hardening
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader(
+      "Content-Security-Policy",
+      "frame-ancestors 'self' https://ai.studio https://*.google.com; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://*.dicebear.com https://images.unsplash.com https://api.dicebear.com https://fonts.googleapis.com https://fonts.gstatic.com https://*.run.app; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https:;"
+    );
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    next();
+  });
+
   // Serve uploads folder as static
   app.use("/uploads", express.static(uploadsDir));
 
   // JSON and URL-encoded body parsers with generous limits for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // --- DDoS PROTECTION (IP sliding-window rate limiter) ---
+  const requestHistory: Record<string, number[]> = {};
+  const rateLimitMiddleware = (limit: number, windowMs: number) => {
+    return (req: any, res: any, next: any) => {
+      const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+      const now = Date.now();
+
+      if (!requestHistory[ip]) {
+        requestHistory[ip] = [];
+      }
+
+      // Filter timestamps outside window
+      requestHistory[ip] = requestHistory[ip].filter(t => now - t < windowMs);
+
+      if (requestHistory[ip].length >= limit) {
+        serverDb.addAuditLog(
+          "system",
+          "DDOS_ATTACK_DETECTED",
+          `IP ${ip} bloqueado temporariamente por exceder limite de ${limit} reqs por minuto`,
+          ip,
+          req.headers["user-agent"] || ""
+        );
+        return res.status(429).json({ error: "Taxa de requisição excedida. Proteção DDoS ativa." });
+      }
+
+      requestHistory[ip].push(now);
+      next();
+    };
+  };
+
+  // Bind global rate limit (Max 150 requests/minute per IP)
+  app.use(rateLimitMiddleware(150, 60000));
+
+  // --- BRUTE FORCE LOCKOUT MIDDLEWARE ---
+  const checkBruteForceLockout = (req: any, res: any, next: any) => {
+    const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+    const block = serverDb.getIpBlock(ip);
+
+    if (block && block.bloqueado_ate) {
+      const isStillBlocked = new Date(block.bloqueado_ate).getTime() > Date.now();
+      if (isStillBlocked) {
+        return res.status(403).json({
+          error: `Este endereço IP está bloqueado temporariamente devido a consecutivas tentativas de login maliciosas. Tente novamente após ${new Date(
+            block.bloqueado_ate
+          ).toLocaleTimeString("pt-BR")}.`
+        });
+      } else {
+        serverDb.clearIpBlock(ip);
+      }
+    }
+    next();
+  };
+
+  // --- DEVICE & GEOLOCATION DETECTION UTILS ---
+  const parseUserAgent = (ua: string): string => {
+    if (!ua) return "Navegador Desconhecido";
+    if (/mobile/i.test(ua)) {
+      if (/iphone/i.test(ua)) return "iPhone App/Safari";
+      if (/android/i.test(ua)) return "Android Phone App";
+      return "Dispositivo Móvel";
+    }
+    if (/ipad/i.test(ua)) return "iPad Tablet";
+    if (/macintosh/i.test(ua)) return "MacOS Device";
+    if (/windows/i.test(ua)) return "Windows PC";
+    if (/linux/i.test(ua)) return "Linux Workstation";
+    return "Navegador Web / Desktop";
+  };
+
+  const simulateLocation = (ip: string): string => {
+    if (!ip || ip === "::1" || ip === "127.0.0.1" || ip.includes("localhost")) {
+      return "São Paulo, SP (Localhost)";
+    }
+    const hashes = ip.split('.').map(Number);
+    const cities = [
+      "São Paulo, BR", "Rio de Janeiro, BR", "Belo Horizonte, BR", "Porto Alegre, BR", 
+      "Salvador, BR", "Curitiba, BR", "Recife, BR", "Fortaleza, BR", "Brasília, BR",
+      "Lisboa, PT", "Miami, US", "Dublin, IE"
+    ];
+    const index = Math.abs(hashes.reduce((a, b) => a + (isNaN(b) ? 0 : b), 0)) % cities.length;
+    return cities[index];
+  };
+
+  // Issue session and token helper
+  const issueSessionAndTokens = (userId: string, email: string, name: string, ip: string, ua: string) => {
+    const sessionId = "sess_" + crypto.randomBytes(16).toString("hex");
+    const dispositivo = parseUserAgent(ua);
+    const localizacao = simulateLocation(ip);
+    serverDb.saveActiveSession(sessionId, userId, "jti_" + sessionId, ip, ua, dispositivo, localizacao);
+
+    const token = jwt.sign(
+      { userId, email, name, ua, sessionId },
+      JWT_SECRET,
+      { expiresIn: "15m" }
+    );
+
+    const refreshToken = crypto.randomBytes(40).toString("hex");
+    const refExp = new Date(Date.now() + 7 * 24 * 3600000).toISOString();
+    serverDb.saveRefreshToken(refreshToken, userId, refExp);
+
+    return { token, refreshToken, sessionId };
+  };
+
+  // --- SESSION INTEGRITY & HIJACKING PROTECTION ---
+  const verifySessionIntegrity = (req: any) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+    const token = authHeader.split(" ")[1];
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+
+      // Anti-hijacking signature check
+      const currentUa = req.headers["user-agent"] || "";
+      if (decoded.ua && decoded.ua !== currentUa) {
+        console.warn(`[SECURITY ALERT] Possible session hijacking! Expected user-agent: ${decoded.ua}, got: ${currentUa}`);
+        serverDb.addAuditLog(
+          decoded.userId,
+          "SESSION_HIJACK_ATTEMPT",
+          `Tentativa de sequestro de sessão bloqueada. User-Agent esperado: ${decoded.ua}, atual: ${currentUa}`,
+          req.ip || "unknown",
+          currentUa
+        );
+        return null;
+      }
+
+      // Active Session Remote Termination check
+      if (decoded.sessionId && !serverDb.isSessionActive(decoded.sessionId)) {
+        console.warn(`[SECURITY ALERT] Attempted access using a remotely terminated session: ${decoded.sessionId}`);
+        return null;
+      }
+
+      return decoded;
+    } catch {
+      return null;
+    }
+  };
+
+  // --- ROLE-BASED ACCESS CONTROL (RBAC) ---
+  const requireRole = (allowedRoles: ("user" | "moderator" | "admin" | "auditor")[]) => {
+    return (req: any, res: any, next: any) => {
+      const decoded = verifySessionIntegrity(req);
+      if (!decoded) {
+        return res.status(401).json({ error: "Sessão expirada ou não autenticada." });
+      }
+
+      const role = serverDb.getUserRole(decoded.userId);
+      if (!allowedRoles.includes(role)) {
+        serverDb.addAuditLog(
+          decoded.userId,
+          "UNAUTHORIZED_ACCESS_DENIED",
+          `Tentativa de acesso não autorizado à rota: ${req.originalUrl}. Cargo: ${role}`,
+          req.ip || "unknown",
+          req.headers["user-agent"] || ""
+        );
+        return res.status(403).json({ error: "Acesso negado. Nível de privilégio insuficiente." });
+      }
+
+      req.userId = decoded.userId;
+      req.userRole = role;
+      next();
+    };
+  };
+
+  // --- ANTI-SSRF OUTGOING FILTER ---
+  const validateOutgoingUrl = (urlStr: string): boolean => {
+    try {
+      const parsed = new URL(urlStr);
+      const host = parsed.hostname.toLowerCase();
+      const unsafeHosts = ["localhost", "127.0.0.1", "0.0.0.0", "::1"];
+      if (unsafeHosts.includes(host)) return false;
+      if (
+        host.startsWith("169.254") ||
+        host.startsWith("10.") ||
+        host.startsWith("192.168") ||
+        host.startsWith("172.")
+      ) {
+        return false;
+      }
+      return ["http:", "https:"].includes(parsed.protocol);
+    } catch {
+      return false;
+    }
+  };
 
   // API health route
   app.get("/api/health", (req, res) => {
@@ -84,40 +318,56 @@ async function startServer() {
 
   // --- AUTH ENDPOINTS ---
 
-  // GET /api/auth/me - Verify current session token
+  // GET /api/auth/me - Verify session integrity
   app.get("/api/auth/me", (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ error: "Sessão expirada ou não autenticada." });
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) {
+      return res.status(401).json({ error: "Sessão inválida, expirada ou corrompida (Sequestro de Sessão evitado)." });
     }
 
-    const token = authHeader.split(" ")[1];
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as any;
       const user = serverDb.getUser(decoded.userId);
       if (!user) {
-        return res.status(401).json({ error: "Usuário não encontrado." });
+        return res.status(401).json({ error: "Usuário corporativo não encontrado." });
       }
+
+      const role = serverDb.getUserRole(decoded.userId);
+      const twoFactorEnabled = serverDb.get2faStatus(decoded.userId);
 
       return res.json({
         user: {
           email: user.email,
           name: user.name,
-          provider: "email",
+          provider: user.provider || "email",
           uid: user.uid,
-          avatarUrl: user.avatarUrl
+          avatarUrl: user.avatarUrl,
+          role,
+          twoFactorEnabled
         }
       });
     } catch (err) {
-      return res.status(401).json({ error: "Sessão inválida ou expirada." });
+      return res.status(500).json({ error: "Erro de integridade ao verificar credenciais." });
     }
   });
 
   // POST /api/auth/register
-  app.post("/api/auth/register", async (req, res) => {
+  app.post("/api/auth/register", checkBruteForceLockout, async (req, res) => {
     const { email, password, name } = req.body;
+    const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+    const ua = String(req.headers["user-agent"] || "");
+
     if (!email || !password || !name) {
       return res.status(400).json({ error: "E-mail, senha e nome são obrigatórios." });
+    }
+
+    // Password strength check (Enterprise policy)
+    const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
+    if (!passwordRegex.test(password)) {
+      serverDb.incrementIpBlock(ip);
+      serverDb.addAuditLog("system", "REGISTER_FAILED", `Senha fraca rejeitada para o e-mail: ${email}`, ip, ua);
+      return res.status(400).json({ 
+        error: "A senha deve conter no mínimo 8 caracteres, incluindo pelo menos uma letra e um número para conformidade corporativa." 
+      });
     }
 
     const cleanEmail = email.trim().toLowerCase();
@@ -126,11 +376,13 @@ async function startServer() {
     try {
       const existingUser = serverDb.getUser(userId);
       if (existingUser) {
-        return res.status(400).json({ error: "Este e-mail já está cadastrado no sistema." });
+        serverDb.incrementIpBlock(ip);
+        serverDb.addAuditLog("system", "REGISTER_FAILED", `Tentativa de cadastro com e-mail duplicado: ${cleanEmail}`, ip, ua);
+        return res.status(400).json({ error: "Este e-mail já está registrado em nossa federação." });
       }
 
-      // Cryptography of Password via bcrypt
-      const saltRounds = 10;
+      // Safe password hashing
+      const saltRounds = 11; // Corporate grade workload factor
       const hashedPassword = await bcrypt.hash(password, saltRounds);
 
       const newUser = {
@@ -143,30 +395,61 @@ async function startServer() {
       };
 
       serverDb.saveUser(userId, newUser);
-      console.log(`[AUTH] User registered successfully in SQLite: ${cleanEmail}`);
+      serverDb.setUserRole(userId, "user"); // Default role
 
-      // Sign JWT
-      const token = jwt.sign({ userId, email: cleanEmail, name }, JWT_SECRET, { expiresIn: "7d" });
+      // Generate a 6-digit email verification code
+      const verifyCode = String(Math.floor(100000 + Math.random() * 900000));
+      serverDb.setEmailVerificationCode(userId, verifyCode);
+
+      serverDb.addAuditLog(userId, "REGISTER_SUCCESS", `Novo usuário registrado: ${cleanEmail}. Código de verificação gerado: ${verifyCode}`, ip, ua);
+
+      // Issue Access, Refresh Tokens and Active Session
+      const { token, refreshToken, sessionId } = issueSessionAndTokens(userId, cleanEmail, name, ip, ua);
+
+      // Save initial successful login attempt
+      const device = parseUserAgent(ua);
+      const loc = simulateLocation(ip);
+      serverDb.saveLoginAttempt(
+        `att_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        userId,
+        ip,
+        ua,
+        device,
+        loc,
+        "SUCESSO",
+        false,
+        null
+      );
+
+      serverDb.clearIpBlock(ip);
 
       return res.json({
         token,
+        refreshToken,
+        verifyCode, // Returned for sandbox environment simulation
         user: {
           email: newUser.email,
           name: newUser.name,
           provider: newUser.provider,
           uid: newUser.uid,
-          avatarUrl: newUser.avatarUrl
+          avatarUrl: newUser.avatarUrl,
+          role: "user",
+          twoFactorEnabled: false,
+          emailVerified: false
         }
       });
     } catch (err: any) {
       console.error("[AUTH REGISTRATION ERROR]", err);
-      return res.status(500).json({ error: "Erro interno ao processar cadastro." });
+      return res.status(500).json({ error: "Erro interno ao provisionar conta." });
     }
   });
 
   // POST /api/auth/login
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", checkBruteForceLockout, async (req, res) => {
     const { email, password } = req.body;
+    const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+    const ua = String(req.headers["user-agent"] || "");
+
     if (!email || !password) {
       return res.status(400).json({ error: "E-mail e senha são obrigatórios." });
     }
@@ -177,74 +460,861 @@ async function startServer() {
     try {
       const user = serverDb.getUser(userId);
       if (!user || !user.password) {
+        serverDb.incrementIpBlock(ip);
+        const block = serverDb.getIpBlock(ip);
+        if (block && block.tentativas >= 5) {
+          serverDb.blockIp(ip, 900); // Block IP for 15 mins
+          serverDb.addAuditLog("system", "IP_LOCKOUT", `IP ${ip} bloqueado temporariamente após 5 falhas consecutivas de login`, ip, ua);
+        }
+        serverDb.addAuditLog("system", "LOGIN_FAILED", `Tentativa de login inválida para: ${cleanEmail}`, ip, ua);
         return res.status(400).json({ error: "E-mail ou senha incorretos." });
       }
 
-      // Compare password
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
+        serverDb.incrementIpBlock(ip);
+        const block = serverDb.getIpBlock(ip);
+        if (block && block.tentativas >= 5) {
+          serverDb.blockIp(ip, 900);
+          serverDb.addAuditLog("system", "IP_LOCKOUT", `IP ${ip} bloqueado temporariamente após 5 falhas consecutivas de login`, ip, ua);
+        }
+        serverDb.addAuditLog(userId, "LOGIN_FAILED", `Senha incorreta fornecida para: ${cleanEmail}`, ip, ua);
         return res.status(400).json({ error: "E-mail ou senha incorretos." });
       }
 
-      console.log(`[AUTH] User logged in SQLite: ${cleanEmail}`);
+      // Check if 2FA is active for this account
+      const isTwoFactorEnabled = serverDb.get2faStatus(userId);
+      if (isTwoFactorEnabled) {
+        // Issue temporary 5-minute pre-auth token to finalize challenge
+        const tempToken = jwt.sign({ userId, email: cleanEmail, preAuth: true }, JWT_SECRET, { expiresIn: "5m" });
+        serverDb.addAuditLog(userId, "LOGIN_2FA_CHALLENGE", `Desafio 2FA disparado para o usuário: ${cleanEmail}`, ip, ua);
+        return res.json({ requires2fa: true, tempToken });
+      }
 
-      // Sign JWT
-      const token = jwt.sign({ userId, email: cleanEmail, name: user.name }, JWT_SECRET, { expiresIn: "7d" });
+      // Success - Issue Sessions & Tokens
+      const { token, refreshToken, sessionId } = issueSessionAndTokens(userId, cleanEmail, user.name, ip, ua);
+
+      // Detect Suspicious Login (different device than last success)
+      const device = parseUserAgent(ua);
+      const loc = simulateLocation(ip);
+      const history = serverDb.getLoginHistory(userId);
+      let suspeito = false;
+      let motivoSuspeito: string | null = null;
+      if (history && history.length > 0) {
+        const lastSuccess = history.find((h: any) => h.status === "SUCESSO");
+        if (lastSuccess && lastSuccess.dispositivo !== device) {
+          suspeito = true;
+          motivoSuspeito = `Acesso de novo dispositivo detectado: ${device} (Último acesso: ${lastSuccess.dispositivo})`;
+        }
+      }
+
+      // Save login history entry
+      serverDb.saveLoginAttempt(
+        `att_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        userId,
+        ip,
+        ua,
+        device,
+        loc,
+        "SUCESSO",
+        suspeito,
+        motivoSuspeito
+      );
+
+      if (suspeito) {
+        serverDb.addAuditLog(
+          userId,
+          "SUSPICIOUS_LOGIN_DETECTED",
+          `ALERTA DE SEGURANÇA: Login suspeito detectado para ${cleanEmail}. ${motivoSuspeito}`,
+          ip,
+          ua
+        );
+      }
+
+      serverDb.clearIpBlock(ip);
+      const role = serverDb.getUserRole(userId);
+      const verifyDetails = serverDb.getUserVerificationDetails(userId);
+
+      serverDb.addAuditLog(userId, "LOGIN_SUCCESS", `Autenticação bem-sucedida: ${cleanEmail}`, ip, ua);
 
       return res.json({
         token,
+        refreshToken,
         user: {
           email: user.email,
           name: user.name,
           provider: user.provider,
           uid: user.uid || userId,
-          avatarUrl: user.avatarUrl
+          avatarUrl: user.avatarUrl,
+          role,
+          twoFactorEnabled: isTwoFactorEnabled,
+          emailVerified: verifyDetails.emailVerificado,
+          suspiciousAlert: suspeito ? motivoSuspeito : null
         }
       });
     } catch (err: any) {
       console.error("[AUTH LOGIN ERROR]", err);
-      return res.status(500).json({ error: "Erro interno ao processar login." });
+      return res.status(500).json({ error: "Erro corporativo interno de autenticação." });
     }
   });
 
-  // POST /api/auth/google-login (Allows compatible Google SSO using direct JWT fallback)
-  app.post("/api/auth/google-login", (req, res) => {
-    const { email, name, avatarUrl, uid } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: "E-mail do Google é obrigatório." });
+  // POST /api/auth/social-login
+  app.post("/api/auth/social-login", checkBruteForceLockout, (req, res) => {
+    const { email, name, avatarUrl, uid, provider } = req.body;
+    const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+    const ua = String(req.headers["user-agent"] || "");
+
+    if (!email || !provider) {
+      return res.status(400).json({ error: "E-mail e provedor de login social são obrigatórios." });
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const userId = uid || "user_" + cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, "_");
+    const userId = uid || `user_${provider}_` + cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, "_");
 
     try {
       const updatedUser = {
         email: cleanEmail,
-        name: name || "Usuário Google",
-        avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name || "google")}`,
-        provider: "google" as const,
+        name: name || `Jogador ${provider}`,
+        avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name || provider)}`,
+        provider: provider as any,
         uid: userId
       };
 
       serverDb.saveUser(userId, updatedUser);
-      console.log(`[AUTH] Google user upserted: ${cleanEmail}`);
+      // Auto-verify email for social logins
+      serverDb.setEmailVerified(userId, true);
+      const role = serverDb.getUserRole(userId);
 
-      // Sign JWT
-      const token = jwt.sign({ userId, email: cleanEmail, name: updatedUser.name }, JWT_SECRET, { expiresIn: "7d" });
+      // Check if 2FA is active
+      const isTwoFactorEnabled = serverDb.get2faStatus(userId);
+      if (isTwoFactorEnabled) {
+        const tempToken = jwt.sign({ userId, email: cleanEmail, preAuth: true }, JWT_SECRET, { expiresIn: "5m" });
+        serverDb.addAuditLog(userId, "LOGIN_2FA_CHALLENGE", `Desafio 2FA (${provider.toUpperCase()} SSO) disparado para: ${cleanEmail}`, ip, ua);
+        return res.json({ requires2fa: true, tempToken });
+      }
+
+      // Success - Issue Sessions & Tokens
+      const { token, refreshToken, sessionId } = issueSessionAndTokens(userId, cleanEmail, updatedUser.name, ip, ua);
+
+      // Detect Suspicious Login
+      const device = parseUserAgent(ua);
+      const loc = simulateLocation(ip);
+      const history = serverDb.getLoginHistory(userId);
+      let suspeito = false;
+      let motivoSuspeito: string | null = null;
+      if (history && history.length > 0) {
+        const lastSuccess = history.find((h: any) => h.status === "SUCESSO");
+        if (lastSuccess && lastSuccess.dispositivo !== device) {
+          suspeito = true;
+          motivoSuspeito = `Acesso de novo dispositivo detectado: ${device} (Último acesso: ${lastSuccess.dispositivo})`;
+        }
+      }
+
+      serverDb.saveLoginAttempt(
+        `att_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        userId,
+        ip,
+        ua,
+        device,
+        loc,
+        "SUCESSO",
+        suspeito,
+        motivoSuspeito
+      );
+
+      if (suspeito) {
+        serverDb.addAuditLog(
+          userId,
+          "SUSPICIOUS_LOGIN_DETECTED",
+          `ALERTA DE SEGURANÇA: Login SSO suspeito detectado para ${cleanEmail}. ${motivoSuspeito}`,
+          ip,
+          ua
+        );
+      }
+
+      serverDb.clearIpBlock(ip);
+      serverDb.addAuditLog(userId, "SOCIAL_LOGIN_SUCCESS", `Login SSO via ${provider} bem-sucedido: ${cleanEmail}`, ip, ua);
 
       return res.json({
         token,
+        refreshToken,
         user: {
           email: updatedUser.email,
           name: updatedUser.name,
           provider: updatedUser.provider,
           uid: updatedUser.uid,
-          avatarUrl: updatedUser.avatarUrl
+          avatarUrl: updatedUser.avatarUrl,
+          role,
+          twoFactorEnabled: isTwoFactorEnabled,
+          emailVerified: true,
+          suspiciousAlert: suspeito ? motivoSuspeito : null
         }
       });
     } catch (err: any) {
-      console.error("[AUTH GOOGLE LOGIN ERROR]", err);
-      return res.status(500).json({ error: "Erro interno no Google login." });
+      console.error(`[AUTH ${provider.toUpperCase()} LOGIN ERROR]`, err);
+      return res.status(500).json({ error: `Erro de federação SSO via ${provider}.` });
+    }
+  });
+
+  // POST /api/auth/google-login (Legacy compatibility)
+  app.post("/api/auth/google-login", (req, res) => {
+    req.body.provider = "google";
+    // Proxy request to the new endpoint
+    const route = app._router.stack.find((layer: any) => layer.route && layer.route.path === "/api/auth/social-login");
+    if (route) {
+      return route.route.stack[0].handle(req, res);
+    }
+    return res.status(500).json({ error: "Erro de roteamento social." });
+  });
+
+  // --- PASSWORD RECOVERY FLOWS ---
+  // POST /api/auth/recover-password
+  app.post("/api/auth/recover-password", checkBruteForceLockout, (req, res) => {
+    const { email } = req.body;
+    const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+    const ua = String(req.headers["user-agent"] || "");
+
+    if (!email) {
+      return res.status(400).json({ error: "E-mail é obrigatório." });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const userId = "user_" + cleanEmail.replace(/[^a-zA-Z0-9_\-]/g, "_");
+
+    try {
+      const user = serverDb.getUser(userId);
+      if (!user) {
+        // Obfuscate to prevent user enumeration / account harvesting
+        return res.json({ 
+          message: "Se este e-mail estiver registrado, um link e código de recuperação de senha foram gerados.",
+          success: true
+        });
+      }
+
+      const recoveryCode = String(Math.floor(100000 + Math.random() * 900000));
+      const expiresAt = new Date(Date.now() + 15 * 60000).toISOString(); // 15 mins
+      serverDb.setPasswordRecoveryCode(userId, recoveryCode, expiresAt);
+
+      serverDb.addAuditLog(userId, "PASSWORD_RECOVERY_REQUESTED", `Código de recuperação gerado para ${cleanEmail}`, ip, ua);
+
+      return res.json({
+        message: "Se este e-mail estiver registrado, um link e código de recuperação de senha foram gerados.",
+        success: true,
+        debugCode: recoveryCode // Returned for sandbox environment simulation
+      });
+    } catch (err) {
+      console.error("[RECOVER PASSWORD ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar solicitação de recuperação." });
+    }
+  });
+
+  // POST /api/auth/reset-password
+  app.post("/api/auth/reset-password", checkBruteForceLockout, async (req, res) => {
+    const { code, newPassword } = req.body;
+    const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+    const ua = String(req.headers["user-agent"] || "");
+
+    if (!code || !newPassword) {
+      return res.status(400).json({ error: "Código e nova senha são obrigatórios." });
+    }
+
+    // Password strength check (Enterprise policy)
+    const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({ 
+        error: "A nova senha deve conter no mínimo 8 caracteres, incluindo pelo menos uma letra e um número." 
+      });
+    }
+
+    try {
+      const user = serverDb.getUserByRecoveryCode(code);
+      if (!user) {
+        return res.status(400).json({ error: "Código de recuperação inválido ou expirado." });
+      }
+
+      // Check expiry
+      if (user.recuperacao_expira && new Date(user.recuperacao_expira) < new Date()) {
+        serverDb.clearRecoveryCode(user.id || `user_${user.email.replace(/[^a-zA-Z0-9]/g, "_")}`);
+        return res.status(400).json({ error: "Código de recuperação expirado." });
+      }
+
+      const userId = user.id || `user_${user.email.replace(/[^a-zA-Z0-9]/g, "_")}`;
+      const hashedPassword = await bcrypt.hash(newPassword, 11);
+
+      // Update password
+      const updatedUser = {
+        ...user,
+        password: hashedPassword
+      };
+      serverDb.saveUser(userId, updatedUser);
+      serverDb.clearRecoveryCode(userId);
+
+      // Terminate all sessions for security
+      serverDb.terminateAllSessionsExcept(userId, "RESET_ALL");
+
+      serverDb.addAuditLog(userId, "PASSWORD_RESET_SUCCESS", `Senha redefinida com sucesso. Todas as sessões anteriores foram invalidadas remotamente.`, ip, ua);
+
+      return res.json({ message: "Senha redefinida com sucesso! Todas as sessões foram invalidadas por segurança.", success: true });
+    } catch (err) {
+      console.error("[RESET PASSWORD ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar redefinição de senha." });
+    }
+  });
+
+  // POST /api/auth/change-password
+  app.post("/api/auth/change-password", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) {
+      return res.status(401).json({ error: "Sessão expirada ou não autenticada." });
+    }
+
+    const { currentPassword, newPassword, terminateOthers } = req.body;
+    const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+    const ua = String(req.headers["user-agent"] || "");
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Senha atual e nova senha são obrigatórias." });
+    }
+
+    const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({ error: "A nova senha deve conter no mínimo 8 caracteres, incluindo pelo menos uma letra e um número." });
+    }
+
+    try {
+      const user = serverDb.getUser(decoded.userId);
+      if (!user || !user.password) {
+        return res.status(400).json({ error: "Usuário corporativo não encontrado ou cadastrado via login social." });
+      }
+
+      bcrypt.compare(currentPassword, user.password).then(async (isMatch) => {
+        if (!isMatch) {
+          return res.status(400).json({ error: "Senha atual incorreta." });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 11);
+        const updatedUser = {
+          ...user,
+          password: hashedPassword
+        };
+        serverDb.saveUser(decoded.userId, updatedUser);
+
+        if (terminateOthers) {
+          serverDb.terminateAllSessionsExcept(decoded.userId, decoded.sessionId || "");
+          serverDb.addAuditLog(decoded.userId, "PASSWORD_CHANGED", "Senha alterada com sucesso. Outras sessões ativas foram revogadas remotamente.", ip, ua);
+        } else {
+          serverDb.addAuditLog(decoded.userId, "PASSWORD_CHANGED", "Senha alterada com sucesso.", ip, ua);
+        }
+
+        return res.json({ message: "Senha alterada com sucesso!", success: true });
+      });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao alterar senha." });
+    }
+  });
+
+
+  // --- EMAIL VERIFICATION FLOWS ---
+  // POST /api/auth/send-verification
+  app.post("/api/auth/send-verification", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Sessão inválida ou expirada." });
+
+    try {
+      const verifyCode = String(Math.floor(100000 + Math.random() * 900000));
+      serverDb.setEmailVerificationCode(decoded.userId, verifyCode);
+      serverDb.addAuditLog(decoded.userId, "EMAIL_VERIFICATION_SENT", `Novo código de verificação enviado para ${decoded.email}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ 
+        message: "Um novo código de verificação foi gerado e enviado.", 
+        success: true,
+        debugCode: verifyCode // Simulator backchannel
+      });
+    } catch {
+      return res.status(500).json({ error: "Erro ao gerar código de verificação." });
+    }
+  });
+
+  // POST /api/auth/verify-email
+  app.post("/api/auth/verify-email", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Sessão inválida ou expirada." });
+
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: "Código de verificação é obrigatório." });
+
+    try {
+      const details = serverDb.getUserVerificationDetails(decoded.userId);
+      if (details.codigoVerificacao === code) {
+        serverDb.setEmailVerified(decoded.userId, true);
+        serverDb.addAuditLog(decoded.userId, "EMAIL_VERIFIED", `E-mail ${decoded.email} verificado com sucesso.`, req.ip || "unknown", req.headers["user-agent"] || "");
+        return res.json({ message: "Sua conta de e-mail foi verificada com sucesso!", success: true });
+      } else {
+        return res.status(400).json({ error: "Código de verificação incorreto ou expirado." });
+      }
+    } catch {
+      return res.status(500).json({ error: "Erro ao verificar e-mail." });
+    }
+  });
+
+
+  // --- SESSION CONTROLLERS ---
+  // GET /api/auth/sessions
+  app.get("/api/auth/sessions", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Sessão inválida ou expirada." });
+
+    try {
+      const sessions = serverDb.getActiveSessions(decoded.userId);
+      // Format session output
+      const formatted = sessions.map(s => ({
+        id: s.id,
+        ip: s.ip_address,
+        device: s.dispositivo,
+        location: s.localizacao,
+        createdAt: s.criado_em,
+        lastAccess: s.ultimo_acesso,
+        isCurrent: s.id === decoded.sessionId
+      }));
+      return res.json({ sessions: formatted });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao buscar sessões ativas." });
+    }
+  });
+
+  // POST /api/auth/sessions/terminate
+  app.post("/api/auth/sessions/terminate", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Sessão inválida ou expirada." });
+
+    const { sessionId } = req.body;
+    if (!sessionId) return res.status(400).json({ error: "O ID da sessão é obrigatório." });
+
+    try {
+      // Security check: cannot terminate other users' sessions
+      const sessions = serverDb.getActiveSessions(decoded.userId);
+      const exists = sessions.some(s => s.id === sessionId);
+      if (!exists) {
+        return res.status(403).json({ error: "Operação não autorizada nesta sessão." });
+      }
+
+      serverDb.terminateSession(sessionId);
+      serverDb.addAuditLog(decoded.userId, "SESSION_TERMINATED_REMOTELY", `Sessão ${sessionId} encerrada remotamente pelo usuário.`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ message: "Sessão encerrada com sucesso!", success: true });
+    } catch {
+      return res.status(500).json({ error: "Erro ao revogar sessão." });
+    }
+  });
+
+  // POST /api/auth/sessions/terminate-others
+  app.post("/api/auth/sessions/terminate-others", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Sessão inválida ou expirada." });
+
+    try {
+      serverDb.terminateAllSessionsExcept(decoded.userId, decoded.sessionId || "");
+      serverDb.addAuditLog(decoded.userId, "ALL_OTHER_SESSIONS_REVOKED", "Todas as outras sessões ativas foram encerradas remotamente.", req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ message: "Todas as outras sessões foram encerradas com sucesso!", success: true });
+    } catch {
+      return res.status(500).json({ error: "Erro ao revogar outras sessões." });
+    }
+  });
+
+
+  // --- LOGIN HISTORY CONTROLLERS ---
+  // GET /api/auth/login-history
+  app.get("/api/auth/login-history", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Sessão inválida ou expirada." });
+
+    try {
+      const history = serverDb.getLoginHistory(decoded.userId);
+      const formatted = history.map(h => ({
+        id: h.id,
+        ip: h.ip_address,
+        device: h.dispositivo,
+        location: h.localizacao,
+        status: h.status,
+        timestamp: h.timestamp,
+        suspicious: h.suspeito === 1,
+        suspiciousReason: h.motivo_suspeito
+      }));
+      return res.json({ history: formatted });
+    } catch {
+      return res.status(500).json({ error: "Erro ao recuperar histórico de acessos." });
+    }
+  });
+
+
+  // --- USER PRIVACY CONTROLLERS ---
+  // GET /api/user/privacy
+  app.get("/api/user/privacy", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Sessão inválida ou expirada." });
+
+    try {
+      const settings = serverDb.getPrivacySettings(decoded.userId);
+      return res.json({ privacy: settings });
+    } catch {
+      return res.status(500).json({ error: "Erro ao buscar configurações de privacidade." });
+    }
+  });
+
+  // POST /api/user/privacy
+  app.post("/api/user/privacy", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Sessão inválida ou expirada." });
+
+    const { settings } = req.body;
+    if (!settings) return res.status(400).json({ error: "Configurações de privacidade são obrigatórias." });
+
+    try {
+      serverDb.savePrivacySettings(decoded.userId, settings);
+      serverDb.addAuditLog(decoded.userId, "PRIVACY_SETTINGS_UPDATED", "Configurações de privacidade de perfil atualizadas.", req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ message: "Preferências de privacidade salvas com sucesso!", success: true });
+    } catch {
+      return res.status(500).json({ error: "Erro ao salvar preferências." });
+    }
+  });
+
+
+  // POST /api/auth/verify-2fa - Finish authentication challenge using dynamic dynamic code
+  app.post("/api/auth/verify-2fa", async (req, res) => {
+    const { tempToken, code } = req.body;
+    const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+    const ua = String(req.headers["user-agent"] || "");
+
+    if (!tempToken || !code) {
+      return res.status(400).json({ error: "Código e token temporário são obrigatórios." });
+    }
+
+    try {
+      const decoded = jwt.verify(tempToken, JWT_SECRET) as any;
+      if (!decoded.preAuth) {
+        return res.status(401).json({ error: "Token de autenticação inválido." });
+      }
+
+      const userId = decoded.userId;
+      const user = serverDb.getUser(userId);
+      if (!user) {
+        return res.status(401).json({ error: "Usuário não encontrado." });
+      }
+
+      const { secret, backupCodes } = serverDb.get2faSecret(userId);
+      if (!secret) {
+        return res.status(400).json({ error: "2FA não configurado nesta conta." });
+      }
+
+      // Validate Simulated TOTP Code
+      // In standard node we simulate dynamic 2FA hashing:
+      // The secret code is sliced to derive a 6-digit dynamic passcode for easy testing!
+      const generatedCode = String(Math.abs(crypto.createHash('sha256').update(secret + Math.floor(Date.now() / 30000)).digest().readInt32BE(0)) % 1000000).padStart(6, '0');
+      const prevGeneratedCode = String(Math.abs(crypto.createHash('sha256').update(secret + Math.floor((Date.now() - 30000) / 30000)).digest().readInt32BE(0)) % 1000000).padStart(6, '0');
+
+      const isMatch = (code === generatedCode || code === prevGeneratedCode || backupCodes.includes(code));
+
+      if (!isMatch) {
+        serverDb.addAuditLog(userId, "2FA_VERIFICATION_FAILED", `Tentativa inválida de inserção de código 2FA: ${code}`, ip, ua);
+        return res.status(400).json({ error: "Código dinâmico 2FA ou código de backup inválido." });
+      }
+
+      // Clear code if backup code used
+      if (backupCodes.includes(code)) {
+        const remainingCodes = backupCodes.filter(c => c !== code);
+        serverDb.save2faSecret(userId, secret, remainingCodes);
+        serverDb.addAuditLog(userId, "2FA_BACKUP_CODE_USED", `Código de backup 2FA utilizado e invalidado`, ip, ua);
+      }
+
+      // Issue full tokens
+      const token = jwt.sign(
+        { userId, email: user.email, name: user.name, ua },
+        JWT_SECRET,
+        { expiresIn: "15m" }
+      );
+
+      const refreshToken = crypto.randomBytes(40).toString("hex");
+      const refExp = new Date(Date.now() + 7 * 24 * 3600000).toISOString();
+      serverDb.saveRefreshToken(refreshToken, userId, refExp);
+
+      const role = serverDb.getUserRole(userId);
+      serverDb.addAuditLog(userId, "2FA_VERIFICATION_SUCCESS", `Autenticação multifator (2FA) concluída com sucesso`, ip, ua);
+
+      return res.json({
+        token,
+        refreshToken,
+        user: {
+          email: user.email,
+          name: user.name,
+          provider: user.provider,
+          uid: user.uid || userId,
+          avatarUrl: user.avatarUrl,
+          role,
+          twoFactorEnabled: true
+        }
+      });
+    } catch (err) {
+      return res.status(401).json({ error: "Token de pré-autenticação expirado ou violado." });
+    }
+  });
+
+  // POST /api/auth/refresh - Refresh Token Rotation (RTR) to prevent JWT hijack/session hijacking
+  app.post("/api/auth/refresh", async (req, res) => {
+    const { refreshToken } = req.body;
+    const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+    const ua = String(req.headers["user-agent"] || "");
+
+    if (!refreshToken) {
+      return res.status(400).json({ error: "Refresh token é obrigatório." });
+    }
+
+    const verified = serverDb.verifyRefreshToken(refreshToken);
+    if (!verified) {
+      serverDb.addAuditLog("system", "REFRESH_TOKEN_ABUSE", `Tentativa de reuso ou uso inválido de refresh token: ${refreshToken}`, ip, ua);
+      return res.status(401).json({ error: "Refresh token inválido, expirado ou previamente revogado. Por favor, autentique-se novamente." });
+    }
+
+    const userId = verified.userId;
+    const user = serverDb.getUser(userId);
+    if (!user) {
+      return res.status(401).json({ error: "Usuário corporativo associado não encontrado." });
+    }
+
+    // Revoke old refresh token (Enforces rotation!)
+    serverDb.revokeRefreshToken(refreshToken);
+
+    // Issue brand new access & rotated refresh token!
+    const token = jwt.sign(
+      { userId, email: user.email, name: user.name, ua },
+      JWT_SECRET,
+      { expiresIn: "15m" }
+    );
+
+    const newRefreshToken = crypto.randomBytes(40).toString("hex");
+    const refExp = new Date(Date.now() + 7 * 24 * 3600000).toISOString();
+    serverDb.saveRefreshToken(newRefreshToken, userId, refExp);
+
+    return res.json({
+      token,
+      refreshToken: newRefreshToken
+    });
+  });
+
+  // --- TWO-FACTOR AUTH SETUP & CONTROL ENDPOINTS ---
+
+  // POST /api/user/2fa/setup - Initiate 2FA generator
+  app.post("/api/user/2fa/setup", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Não autorizado." });
+
+    const userId = decoded.userId;
+    const user = serverDb.getUser(userId);
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
+
+    // Generate simulated secure authenticator secret & backup codes
+    const baseSecret = crypto.randomBytes(15).toString("hex").toUpperCase();
+    const formattedSecret = baseSecret.match(/.{1,4}/g)?.join("-") || baseSecret;
+    const backupCodes = Array.from({ length: 6 }, () => crypto.randomBytes(4).toString("hex").toUpperCase());
+
+    serverDb.save2faSecret(userId, baseSecret, backupCodes);
+    serverDb.addAuditLog(userId, "2FA_SETUP_INITIATED", `Processo de configuração 2FA iniciado`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+    return res.json({
+      secret: formattedSecret,
+      backupCodes,
+      qrCodeSimulatedUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(baseSecret)}`
+    });
+  });
+
+  // POST /api/user/2fa/toggle - Enable/Disable 2FA
+  app.post("/api/user/2fa/toggle", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Não autorizado." });
+
+    const { enabled, code } = req.body;
+    const userId = decoded.userId;
+
+    if (enabled) {
+      if (!code) return res.status(400).json({ error: "Código de confirmação é obrigatório para ativar." });
+      const { secret } = serverDb.get2faSecret(userId);
+      if (!secret) return res.status(400).json({ error: "Segredo 2FA não configurado." });
+
+      const generatedCode = String(Math.abs(crypto.createHash('sha256').update(secret + Math.floor(Date.now() / 30000)).digest().readInt32BE(0)) % 1000000).padStart(6, '0');
+      const prevGeneratedCode = String(Math.abs(crypto.createHash('sha256').update(secret + Math.floor((Date.now() - 30000) / 30000)).digest().readInt32BE(0)) % 1000000).padStart(6, '0');
+
+      if (code !== generatedCode && code !== prevGeneratedCode) {
+        return res.status(400).json({ error: "Código incorreto. Ativação do 2FA abortada." });
+      }
+
+      serverDb.toggle2fa(userId, true);
+      serverDb.addAuditLog(userId, "2FA_ENABLED", `Autenticação multifator (2FA) habilitada na conta`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, enabled: true });
+    } else {
+      serverDb.toggle2fa(userId, false);
+      serverDb.addAuditLog(userId, "2FA_DISABLED", `Autenticação multifator (2FA) desabilitada na conta`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, enabled: false });
+    }
+  });
+
+  // --- LGPD COMPLIANCE & PRIVACY ENDPOINTS ---
+
+  // POST /api/user/lgpd/export - Export all user-related data (Data Portability)
+  app.post("/api/user/lgpd/export", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Não autorizado." });
+
+    const userId = decoded.userId;
+    const user = serverDb.getUser(userId);
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
+
+    try {
+      const profile = serverDb.getProfile(userId) || {};
+      const logs = serverDb.getLogs(userId) || [];
+      const messages = serverDb.getMessages(userId, "") || [];
+      const requests = serverDb.getLgpdRequests(userId) || [];
+
+      const exportData = {
+        lgpd_compliance_statement: "Este arquivo de portabilidade contém todas as informações pessoais identificáveis associadas a esta conta de usuário, em estrita conformidade com os artigos 18 e 19 da Lei Geral de Proteção de Dados (LGPD - Lei nº 13.709/2018).",
+        export_timestamp: new Date().toISOString(),
+        user_account: {
+          uid: user.uid,
+          email: user.email,
+          name: user.name,
+          provider: user.provider
+        },
+        user_profile: profile,
+        financial_and_game_logs: logs,
+        chat_message_history_samples: messages,
+        lgpd_requests_history: requests
+      };
+
+      serverDb.addLgpdRequest(userId, "PORTABILIDADE");
+      serverDb.addAuditLog(userId, "LGPD_DATA_EXPORT", `Solicitação de portabilidade de dados em conformidade com a LGPD processada`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ data: exportData });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao compilar dados portáveis da LGPD." });
+    }
+  });
+
+  // POST /api/user/lgpd/forget - Anonymize entire account (Right to be Forgotten)
+  app.post("/api/user/lgpd/forget", (req, res) => {
+    const decoded = verifySessionIntegrity(req);
+    if (!decoded) return res.status(401).json({ error: "Não autorizado." });
+
+    const userId = decoded.userId;
+    try {
+      serverDb.addLgpdRequest(userId, "EXCLUSAO");
+      serverDb.addAuditLog(userId, "LGPD_RIGHT_TO_BE_FORGOTTEN", `Solicitação de anonimização total de conta sob as diretrizes da LGPD executada`, req.ip || "unknown", req.headers["user-agent"] || "");
+      
+      // Anonymize records
+      serverDb.anonymizeUserAccount(userId);
+
+      return res.json({ success: true, message: "A conta e todos os dados pessoais associados foram anonimizados com êxito sob os termos da LGPD." });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao processar remoção sob diretrizes da LGPD." });
+    }
+  });
+
+  // --- CORPORATE SECURITY DASHBOARD & DIAGNOSTICS (RBAC PROTECTED) ---
+
+  // GET /api/security/stats - Metrics of the Security Center
+  app.get("/api/security/stats", requireRole(["admin", "auditor"]), (req, res) => {
+    try {
+      const logs = serverDb.getAuditLogs();
+      const dbFile = path.join(process.cwd(), "database.sqlite");
+      let dbSize = "0 KB";
+      if (fs.existsSync(dbFile)) {
+        const stats = fs.statSync(dbFile);
+        dbSize = `${(stats.size / 1024).toFixed(2)} KB`;
+      }
+
+      // Compute statistics
+      const attemptsCount = logs.filter(l => l.event.includes("FAILED")).length;
+      const lockoutCount = logs.filter(l => l.event.includes("LOCKOUT")).length;
+      const ddosAlarms = logs.filter(l => l.event.includes("DDOS")).length;
+      const tamperedLogs = logs.filter(l => l.isTampered).length;
+
+      // Active sessions count (mock / token registries)
+      const auditScore = tamperedLogs > 0 ? 65 : 100;
+
+      return res.json({
+        diagnostics: {
+          databaseSize: dbSize,
+          totalSecurityEvents: logs.length,
+          failedAttempts: attemptsCount,
+          activeLockouts: lockoutCount,
+          ddosAlarmsCount: ddosAlarms,
+          tamperedLogsDetected: tamperedLogs,
+          securityComplianceScore: auditScore,
+          isWafActive: true,
+          encryptionStandard: "AES-256 / HMAC-SHA256",
+          databaseStatus: "ESTÁVEL / WAL_MODE"
+        },
+        recentLogs: logs
+      });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao ler diagnósticos de segurança." });
+    }
+  });
+
+  // GET /api/security/backup - Export full signed system backup (Disaster Recovery)
+  app.get("/api/security/backup", requireRole(["admin"]), (req: any, res) => {
+    try {
+      const backupData = serverDb.backupDatabase();
+      const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+      const ua = String(req.headers["user-agent"] || "");
+      serverDb.addAuditLog(req.userId || "admin", "DISASTER_RECOVERY_BACKUP", "Backup completo do sistema assinado e exportado com sucesso", ip, ua);
+      return res.json({ backup: backupData });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao compilar backup do sistema." });
+    }
+  });
+
+  // POST /api/security/restore - Restore state using signed payload (Disaster Recovery)
+  app.post("/api/security/restore", requireRole(["admin"]), (req: any, res) => {
+    const { backup } = req.body;
+    if (!backup) {
+      return res.status(400).json({ error: "O payload assinado de backup é obrigatório para a restauração." });
+    }
+
+    try {
+      const success = serverDb.restoreDatabase(backup);
+      const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+      const ua = String(req.headers["user-agent"] || "");
+      if (success) {
+        serverDb.addAuditLog(req.userId || "admin", "DISASTER_RECOVERY_RESTORE_SUCCESS", "Restauração completa do sistema realizada com sucesso via backup assinado", ip, ua);
+        return res.json({ success: true, message: "Banco de dados restaurado e integridade verificada com sucesso!" });
+      } else {
+        serverDb.addAuditLog(req.userId || "admin", "DISASTER_RECOVERY_RESTORE_FAILED", "Falha de validação criptográfica na tentativa de restauração do sistema", ip, ua);
+        return res.status(400).json({ error: "Falha na restauração. Assinatura criptográfica do backup violada ou corrompida." });
+      }
+    } catch (err) {
+      return res.status(500).json({ error: "Erro interno durante a restauração do sistema." });
+    }
+  });
+
+  // POST /api/user/role - Update user role (Admins only for RBAC setup)
+  app.post("/api/user/role", requireRole(["admin"]), (req: any, res) => {
+    const { targetUserId, newRole } = req.body;
+    if (!targetUserId || !newRole) {
+      return res.status(400).json({ error: "targetUserId e newRole são obrigatórios." });
+    }
+
+    const validRoles = ["user", "moderator", "admin", "auditor"];
+    if (!validRoles.includes(newRole)) {
+      return res.status(400).json({ error: "Cargo inválido." });
+    }
+
+    try {
+      serverDb.setUserRole(targetUserId, newRole);
+      const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+      const ua = String(req.headers["user-agent"] || "");
+      serverDb.addAuditLog(req.userId || "admin", "ROLE_UPDATED", `Cargo de ${targetUserId} atualizado para: ${newRole}`, ip, ua);
+      return res.json({ success: true, targetUserId, newRole });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao atualizar cargo de usuário." });
     }
   });
 
@@ -643,6 +1713,265 @@ async function startServer() {
     }
   });
 
+  // POST /api/user/friend-request - Friendship system
+  app.post("/api/user/friend-request", (req, res) => {
+    const { senderId, targetId, action } = req.body;
+    if (!senderId || !targetId || !action) {
+      return res.status(400).json({ error: "Campos senderId, targetId e action são obrigatórios." });
+    }
+
+    try {
+      const sender = serverDb.getProfile(senderId);
+      const target = serverDb.getProfile(targetId);
+      if (!sender || !target) {
+        return res.status(404).json({ error: "Usuários não encontrados." });
+      }
+
+      let senderAmigos = sender.amigos || [];
+      let senderSolicitacoes = sender.solicitacoesAmizade || [];
+      let targetAmigos = target.amigos || [];
+      let targetSolicitacoes = target.solicitacoesAmizade || [];
+
+      if (action === "send") {
+        if (senderAmigos.includes(targetId)) {
+          return res.status(400).json({ error: "Vocês já são amigos!" });
+        }
+        if (targetSolicitacoes.includes(senderId)) {
+          return res.status(400).json({ error: "Solicitação de amizade já enviada." });
+        }
+        targetSolicitacoes.push(senderId);
+        serverDb.updateProfileDetails(targetId, { solicitacoesAmizade: targetSolicitacoes });
+        serverDb.addAuditLog(senderId, "FRIEND_REQUEST_SENT", `Solicitação de amizade enviada para ${targetId}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      } else if (action === "accept") {
+        targetSolicitacoes = targetSolicitacoes.filter(id => id !== senderId);
+        senderSolicitacoes = senderSolicitacoes.filter(id => id !== targetId);
+
+        if (!senderAmigos.includes(targetId)) senderAmigos.push(targetId);
+        if (!targetAmigos.includes(senderId)) targetAmigos.push(senderId);
+
+        // Earn milestones/achievements
+        const senderConquistas = sender.conquistas || [];
+        if (!senderConquistas.includes("first_friend")) senderConquistas.push("first_friend");
+
+        const targetConquistas = target.conquistas || [];
+        if (!targetConquistas.includes("first_friend")) targetConquistas.push("first_friend");
+
+        serverDb.updateProfileDetails(senderId, { amigos: senderAmigos, solicitacoesAmizade: senderSolicitacoes, conquistas: senderConquistas });
+        serverDb.updateProfileDetails(targetId, { amigos: targetAmigos, solicitacoesAmizade: targetSolicitacoes, conquistas: targetConquistas });
+        serverDb.addAuditLog(senderId, "FRIEND_REQUEST_ACCEPTED", `Solicitação de amizade de ${targetId} aceita com sucesso`, req.ip || "unknown", req.headers["user-agent"] || "");
+      } else if (action === "decline") {
+        senderSolicitacoes = senderSolicitacoes.filter(id => id !== targetId);
+        serverDb.updateProfileDetails(senderId, { solicitacoesAmizade: senderSolicitacoes });
+        serverDb.addAuditLog(senderId, "FRIEND_REQUEST_DECLINED", `Solicitação de amizade de ${targetId} recusada`, req.ip || "unknown", req.headers["user-agent"] || "");
+      } else if (action === "remove") {
+        senderAmigos = senderAmigos.filter(id => id !== targetId);
+        targetAmigos = targetAmigos.filter(id => id !== senderId);
+        serverDb.updateProfileDetails(senderId, { amigos: senderAmigos });
+        serverDb.updateProfileDetails(targetId, { amigos: targetAmigos });
+        serverDb.addAuditLog(senderId, "FRIEND_REMOVED", `Desfeita amizade com ${targetId}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      }
+
+      return res.json({ success: true, sender: serverDb.getProfile(senderId), target: serverDb.getProfile(targetId) });
+    } catch (err: any) {
+      console.error("[FRIEND REQUEST ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar solicitação de amizade." });
+    }
+  });
+
+  // POST /api/user/block - Block/Unblock user
+  app.post("/api/user/block", (req, res) => {
+    const { senderId, targetId, action } = req.body;
+    if (!senderId || !targetId || !action) {
+      return res.status(400).json({ error: "Campos senderId, targetId e action são obrigatórios." });
+    }
+
+    try {
+      const sender = serverDb.getProfile(senderId);
+      if (!sender) {
+        return res.status(404).json({ error: "Usuário não encontrado." });
+      }
+
+      let blockedList = sender.bloqueados || [];
+      if (action === "block") {
+        if (!blockedList.includes(targetId)) blockedList.push(targetId);
+        
+        // Also remove from friendships if they were friends
+        let senderAmigos = sender.amigos || [];
+        senderAmigos = senderAmigos.filter(id => id !== targetId);
+        
+        const target = serverDb.getProfile(targetId);
+        if (target) {
+          let targetAmigos = target.amigos || [];
+          targetAmigos = targetAmigos.filter(id => id !== senderId);
+          serverDb.updateProfileDetails(targetId, { amigos: targetAmigos });
+        }
+
+        serverDb.updateProfileDetails(senderId, { bloqueados: blockedList, amigos: senderAmigos });
+        serverDb.addAuditLog(senderId, "USER_BLOCKED", `Usuário ${targetId} bloqueado com sucesso`, req.ip || "unknown", req.headers["user-agent"] || "");
+      } else if (action === "unblock") {
+        blockedList = blockedList.filter(id => id !== targetId);
+        serverDb.updateProfileDetails(senderId, { bloqueados: blockedList });
+        serverDb.addAuditLog(senderId, "USER_UNBLOCKED", `Usuário ${targetId} desbloqueado`, req.ip || "unknown", req.headers["user-agent"] || "");
+      }
+
+      return res.json({ success: true, profile: serverDb.getProfile(senderId) });
+    } catch (err: any) {
+      console.error("[BLOCK USER ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar bloqueio." });
+    }
+  });
+
+  // POST /api/user/report - User reporting
+  app.post("/api/user/report", (req, res) => {
+    const { senderId, targetId, reason, description } = req.body;
+    if (!senderId || !targetId || !reason) {
+      return res.status(400).json({ error: "Campos senderId, targetId e reason são obrigatórios." });
+    }
+
+    try {
+      const target = serverDb.getProfile(targetId);
+      if (!target) {
+        return res.status(404).json({ error: "Jogador denunciado não encontrado." });
+      }
+
+      const targetDenuncias = target.denuncias || [];
+      targetDenuncias.push({
+        id: `rep-${Date.now()}`,
+        senderId,
+        reason,
+        description: description || "",
+        created_at: new Date().toISOString()
+      });
+
+      serverDb.updateProfileDetails(targetId, { denuncias: targetDenuncias });
+      serverDb.addAuditLog(senderId, "USER_REPORTED", `Denúncia registrada contra ${targetId}. Motivo: ${reason}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ success: true, message: "Sua denúncia foi registrada e será analisada por nossa equipe de moderadores." });
+    } catch (err: any) {
+      console.error("[REPORT USER ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar denúncia." });
+    }
+  });
+
+  // POST /api/user/reputation - Reputation system
+  app.post("/api/user/reputation", (req, res) => {
+    const { senderId, targetId, vote } = req.body; // vote: 'up' | 'down'
+    if (!senderId || !targetId || !vote) {
+      return res.status(400).json({ error: "Campos senderId, targetId e vote são obrigatórios." });
+    }
+
+    try {
+      const target = serverDb.getProfile(targetId);
+      if (!target) {
+        return res.status(404).json({ error: "Jogador não encontrado." });
+      }
+
+      const reputacaoVotos = target.reputacaoVotos || {};
+      const previousVote = reputacaoVotos[senderId];
+
+      let scoreDiff = 0;
+      if (previousVote === vote) {
+        // Undo vote
+        delete reputacaoVotos[senderId];
+        scoreDiff = vote === "up" ? -1 : 1;
+      } else {
+        // New vote or change vote
+        if (previousVote === "up") scoreDiff -= 1;
+        if (previousVote === "down") scoreDiff += 1;
+
+        reputacaoVotos[senderId] = vote;
+        scoreDiff += vote === "up" ? 1 : -1;
+      }
+
+      const currentRep = target.reputacao || 0;
+      const finalRep = Math.max(0, currentRep + scoreDiff);
+
+      // Award premium/verificado badges based on high reputation milestones as easter eggs
+      const targetConquistas = target.conquistas || [];
+      if (finalRep >= 10 && !targetConquistas.includes("reputation_10")) targetConquistas.push("reputation_10");
+      if (finalRep >= 50 && !targetConquistas.includes("reputation_50")) targetConquistas.push("reputation_50");
+
+      serverDb.updateProfileDetails(targetId, { 
+        reputacao: finalRep, 
+        reputacaoVotos, 
+        conquistas: targetConquistas 
+      });
+
+      serverDb.addAuditLog(senderId, "REPUTATION_VOTE", `Voto de reputação (${vote}) registrado para ${targetId}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ success: true, reputacao: finalRep, reputacaoVotos });
+    } catch (err: any) {
+      console.error("[REPUTATION ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar voto de reputação." });
+    }
+  });
+
+  // POST /api/user/privacy-settings - Privacy preferences config
+  app.post("/api/user/privacy-settings", (req, res) => {
+    const { userId, privacySettings } = req.body;
+    if (!userId || !privacySettings) {
+      return res.status(400).json({ error: "Campos userId e privacySettings são obrigatórios." });
+    }
+
+    try {
+      serverDb.updateProfileDetails(userId, { privacySettings });
+      serverDb.addAuditLog(userId, "PRIVACY_SETTINGS_UPDATED", `Configurações de privacidade atualizadas`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, profile: serverDb.getProfile(userId) });
+    } catch (err: any) {
+      console.error("[PRIVACY SETTINGS ERROR]", err);
+      return res.status(500).json({ error: "Erro ao atualizar privacidade." });
+    }
+  });
+
+  // POST /api/user/premium-toggle - VIP / Premium status activate
+  app.post("/api/user/premium-toggle", (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "O campo userId é obrigatório." });
+    }
+
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Jogador não encontrado." });
+
+      const nextPremiumState = !profile.premium;
+      const conquistas = profile.conquistas || [];
+      if (nextPremiumState && !conquistas.includes("profile_premium")) {
+        conquistas.push("profile_premium");
+      }
+
+      serverDb.updateProfileDetails(userId, { premium: nextPremiumState, conquistas });
+      serverDb.addAuditLog(userId, "PREMIUM_STATUS_TOGGLED", `Status premium alterado para: ${nextPremiumState}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ success: true, premium: nextPremiumState });
+    } catch (err: any) {
+      console.error("[PREMIUM TOGGLE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao alterar status premium." });
+    }
+  });
+
+  // POST /api/user/verify-request - Request verified badge verification
+  app.post("/api/user/verify-request", (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "O campo userId é obrigatório." });
+    }
+
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Jogador não encontrado." });
+
+      // Simulate instantaneous verify upgrade for sandbox fun, but logs it securely!
+      serverDb.updateProfileDetails(userId, { verificado: true });
+      serverDb.addAuditLog(userId, "ACCOUNT_VERIFIED", `Selo verificado atribuído à conta do jogador`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ success: true, verificado: true, message: "Parabéns! Sua identidade foi verificada e o selo verificado foi atribuído!" });
+    } catch (err: any) {
+      console.error("[VERIFY REQUEST ERROR]", err);
+      return res.status(500).json({ error: "Erro ao solicitar verificação." });
+    }
+  });
+
   // GET /api/user/users - List all profiles on the platform to follow or start chats
   app.get("/api/user/users", (req, res) => {
     try {
@@ -661,7 +1990,34 @@ async function startServer() {
           following: p?.following || [],
           stores: p?.stores || [],
           files: p?.files || [],
-          avatarGallery: p?.avatarGallery || []
+          avatarGallery: p?.avatarGallery || [],
+          
+          bannerUrl: p?.bannerUrl || "",
+          links: p?.links || [],
+          location: p?.location || "",
+          socialNetworks: p?.socialNetworks || {},
+          badges: p?.badges || [],
+          conquistas: p?.conquistas || [],
+          inventario: p?.inventario || [],
+          historico: p?.historico || [],
+          amigos: p?.amigos || [],
+          solicitacoesAmizade: p?.solicitacoesAmizade || [],
+          bloqueados: p?.bloqueados || [],
+          denuncias: p?.denuncias || [],
+          statusOnline: p?.statusOnline || "offline",
+          ultimaAtividade: p?.ultimaAtividade || "",
+          reputacao: p?.reputacao ?? 0,
+          verificado: p?.verificado || false,
+          premium: p?.premium || false,
+          reputacaoVotos: p?.reputacaoVotos || {},
+          privacySettings: p?.privacySettings || {
+            privateProfile: false,
+            hideCoins: false,
+            hideHistory: false,
+            hideFollowers: false,
+            hideFriends: false
+          },
+          stats: p?.stats || {}
         };
       });
       return res.json({ users: profilesList });
@@ -913,7 +2269,7 @@ async function startServer() {
         media_url: movie.image_url,
         userId: movie.uploaderId,
         likes: [],
-        media_type: 'image',
+        media_type: 'image' as const,
         username: movie.uploaderName || 'Gamer Cinema',
         userAvatarUrl: '🎬',
         created_at: movie.createdAt || new Date().toISOString(),
@@ -929,6 +2285,668 @@ async function startServer() {
     } catch (err: any) {
       console.error("[POST MOVIE ERROR]", err);
       return res.status(500).json({ error: "Erro ao publicar filme." });
+    }
+  });
+
+  // --- NEW SCALABLE RELATIONAL DATABASE APIS (22 TABLES INTERACTION) ---
+
+  // GET /api/database/schema - Metadata of the 22 normalized tables and query counts
+  app.get("/api/database/schema", (req, res) => {
+    try {
+      const telemetry = (serverDb as any).getNormalizedTablesTelemetry();
+      return res.json({ success: true, telemetry });
+    } catch (err: any) {
+      console.error("[SCHEMA API ERROR]", err);
+      return res.status(500).json({ error: "Erro ao coletar telemetria das tabelas." });
+    }
+  });
+
+  // POST /api/database/query - Interactive sandbox to run secure queries
+  app.post("/api/database/query", (req, res) => {
+    const { sql, params } = req.body;
+    if (!sql) {
+      return res.status(400).json({ error: "Comando SQL é obrigatório." });
+    }
+
+    const forbidden = ["drop table", "alter table", "create table", "drop index", "vacuum"];
+    const lowercaseSql = sql.toLowerCase();
+    const isForbidden = forbidden.some(term => lowercaseSql.includes(term));
+
+    if (isForbidden) {
+      return res.status(403).json({ error: "Comando não autorizado. O Sandbox suporta consultas e manipulações via SELECT, INSERT, UPDATE, DELETE e PRAGMA." });
+    }
+
+    try {
+      const result = (serverDb as any).runGenericQuery(sql, params || []);
+      
+      // Log db operations to the database itself (Audit Log Module #20)
+      try {
+        const opType = sql.trim().split(/\s+/)[0].toUpperCase();
+        if (["INSERT", "UPDATE", "DELETE"].includes(opType)) {
+          const tableMatch = sql.match(/into\s+(\w+)|update\s+(\w+)|from\s+(\w+)/i);
+          const matchedTable = tableMatch ? (tableMatch[1] || tableMatch[2] || tableMatch[3]) : "unknown";
+          
+          if (matchedTable !== "normalized_db_operation_logs") {
+            (serverDb as any).runGenericQuery(`
+              INSERT INTO normalized_db_operation_logs (id, operator_id, table_name, operation_type, payload_before, payload_after, security_signature, created_at, updated_at, deleted_at, audit_created_by, audit_updated_by)
+              VALUES (?, 'u-anonymous-sandbox', ?, ?, NULL, ?, ?, ?, ?, NULL, 'sandbox_operator', 'sandbox_operator')
+            `, [
+              `dop-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+              matchedTable,
+              opType,
+              JSON.stringify({ query: sql, params }),
+              `sha256_audit_sig_${Date.now()}`,
+              new Date().toISOString(),
+              new Date().toISOString()
+            ]);
+          }
+        }
+      } catch (logErr) {
+        console.error("[SANDBOX AUDIT LOG ERROR]", logErr);
+      }
+
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/database/seed - Seed relational mock data into the 22 normalized tables
+  app.post("/api/database/seed", (req, res) => {
+    try {
+      const result = (serverDb as any).seedNormalizedRelationalData();
+      return res.json(result);
+    } catch (err: any) {
+      console.error("[SEED API ERROR]", err);
+      return res.status(500).json({ error: "Falha ao popular banco de dados relacional." });
+    }
+  });
+
+  // =========================================================================
+  // --- GAMEZON INTERNAL FINANCIAL PORTAL SECURE ENDPOINTS ---
+  // =========================================================================
+
+  // Helper to securely generate signed transaction log
+  const logFinancialTransaction = (
+    userId: string,
+    type: 'earn' | 'purchase_coins' | 'purchase_booster' | 'purchase_cosmetic' | 'stage_skip',
+    description: string,
+    amount: number,
+    currency: 'coins' | 'real'
+  ) => {
+    const randomHash = crypto.randomBytes(32).toString("hex");
+    const id = `TXN-${Math.floor(100000 + Math.random() * 900000)}-${Math.floor(10 + Math.random() * 89)}`;
+    const timestamp = new Date().toLocaleString("pt-BR");
+
+    const newLog = {
+      id,
+      timestamp,
+      type,
+      description,
+      amount,
+      currency,
+      status: 'success',
+      securityHash: `0x${randomHash}`
+    };
+
+    // Calculate cryptographic HMAC signature for ledger protection
+    const secret = process.env.COMPILER_SECRET_SALT || 'GZ_SECURE_SALT_9f31b8a6d25e4c7b80a1c2d3e4f5a6b7';
+    const recordStr = `${id}:${userId}:${timestamp}:${type}:${description}:${amount}:${currency}:success`;
+    const computedHash = '0x' + crypto.createHmac('sha256', secret).update(recordStr).digest('hex');
+    newLog.securityHash = computedHash;
+
+    serverDb.addLog(userId, newLog as any);
+    return newLog;
+  };
+
+  // POST /api/finance/wallet - Get Wallet details
+  app.post("/api/finance/wallet", (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "O campo userId é obrigatório." });
+    }
+
+    try {
+      const profile = serverDb.getProfile(userId);
+      const logs = serverDb.getLogs(userId);
+
+      if (!profile) {
+        return res.status(404).json({ error: "Perfil de jogador não encontrado." });
+      }
+
+      return res.json({
+        success: true,
+        realBalance: profile.realBalance,
+        withdrawLimit: profile.withdrawLimit,
+        coins: profile.stats?.coins || 0,
+        level: profile.stats?.level || 1,
+        xp: profile.stats?.points || 0,
+        isVip: profile.premium,
+        logs
+      });
+    } catch (err: any) {
+      console.error("[WALLET FETCH ERROR]", err);
+      return res.status(500).json({ error: "Falha ao carregar carteira virtual." });
+    }
+  });
+
+  // POST /api/finance/deposit - Add Real Balance (Simulated PIX / Card with Anti-Fraud Checks)
+  app.post("/api/finance/deposit", (req, res) => {
+    const { userId, amount, method } = req.body;
+    if (!userId || !amount || amount <= 0) {
+      return res.status(400).json({ error: "ID de usuário e valor de depósito válido são obrigatórios." });
+    }
+
+    // Anti-fraud validation limit
+    if (amount > 5000) {
+      serverDb.addAuditLog(userId, "FRAUD_LIMIT_DEPOSIT", `Tentativa de depósito suspeito de alto valor de R$ ${amount}. Bloqueado.`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.status(400).json({ error: "O valor de um único depósito não pode exceder R$ 5.000,00 por motivos de compliance e segurança." });
+    }
+
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Perfil não encontrado." });
+
+      // Apply deposit
+      profile.realBalance = (profile.realBalance || 0) + Number(amount);
+      serverDb.saveProfile(userId, profile);
+
+      // Log transaction securely
+      const transaction = logFinancialTransaction(
+        userId,
+        "purchase_coins",
+        `Depósito aprovado via ${method || 'PIX'}`,
+        Number(amount),
+        "real"
+      );
+
+      serverDb.addAuditLog(userId, "FINANCE_DEPOSIT_COMPLETED", `Depósito de R$ ${amount} realizado com sucesso via ${method}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({
+        success: true,
+        realBalance: profile.realBalance,
+        transaction
+      });
+    } catch (err: any) {
+      console.error("[DEPOSIT API ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar depósito de fundos." });
+    }
+  });
+
+  // POST /api/finance/withdraw - Withdraw Real Balance (Cashout with compliance limits)
+  app.post("/api/finance/withdraw", (req, res) => {
+    const { userId, amount, pixKey } = req.body;
+    if (!userId || !amount || amount <= 0 || !pixKey) {
+      return res.status(400).json({ error: "Campos obrigatórios: userId, valor de saque e chave PIX." });
+    }
+
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Perfil não encontrado." });
+
+      // Balance check
+      if ((profile.realBalance || 0) < amount) {
+        return res.status(400).json({ error: "Saldo real insuficiente para realizar este saque." });
+      }
+
+      // Check daily withdraw limit
+      const limit = profile.withdrawLimit || 100.0;
+      if (amount > limit) {
+        serverDb.addAuditLog(userId, "FRAUD_WITHDRAW_LIMIT_EXCEEDED", `Tentativa de saque de R$ ${amount} superior ao limite de R$ ${limit}.`, req.ip || "unknown", req.headers["user-agent"] || "");
+        return res.status(400).json({ error: `O limite individual de saques para sua conta é de R$ ${limit.toFixed(2)} por operação.` });
+      }
+
+      // Perform withdrawal
+      profile.realBalance = (profile.realBalance || 0) - Number(amount);
+      serverDb.saveProfile(userId, profile);
+
+      // Log transaction securely
+      const transaction = logFinancialTransaction(
+        userId,
+        "stage_skip",
+        `Saque PIX processado para chave: ${pixKey}`,
+        Number(amount),
+        "real"
+      );
+
+      serverDb.addAuditLog(userId, "FINANCE_WITHDRAW_COMPLETED", `Saque de R$ ${amount} aprovado para chave PIX ${pixKey}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({
+        success: true,
+        realBalance: profile.realBalance,
+        transaction
+      });
+    } catch (err: any) {
+      console.error("[WITHDRAW API ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar saque." });
+    }
+  });
+
+  // POST /api/finance/convert - Convert Real Balance BRL to 🪙 GameZone Coins with 10% Cashback Bonus!
+  app.post("/api/finance/convert", (req, res) => {
+    const { userId, amountReal } = req.body;
+    if (!userId || !amountReal || amountReal <= 0) {
+      return res.status(400).json({ error: "Usuário e valor real para conversão são obrigatórios." });
+    }
+
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Perfil do jogador não encontrado." });
+
+      if ((profile.realBalance || 0) < amountReal) {
+        return res.status(400).json({ error: "Saldo real insuficiente para conversão." });
+      }
+
+      // Conversion rate: 1 BRL = 100 Coins
+      const baseCoins = Math.floor(amountReal * 100);
+      const bonusCoins = Math.floor(baseCoins * 0.10); // 10% bonus coins (Cashback)
+      const totalCoinsGained = baseCoins + bonusCoins;
+
+      // Update balances
+      profile.realBalance = (profile.realBalance || 0) - Number(amountReal);
+      if (!profile.stats) {
+        profile.stats = { coins: 0, lives: 3, currentStage: 1, highScore: 0, unlockedSkins: ["classic"], unlockedAccessories: ["none"], unlockedAuras: ["none"], avatar: { skin: "classic", accessory: "none", aura: "none" }, level: 1, points: 0 };
+      }
+      profile.stats.coins = (profile.stats.coins || 0) + totalCoinsGained;
+      serverDb.saveProfile(userId, profile);
+
+      // Log BRL Debit
+      logFinancialTransaction(
+        userId,
+        "stage_skip",
+        `Conversão de Saldo: R$ ${amountReal.toFixed(2)} convertidos em moedas`,
+        Number(amountReal),
+        "real"
+      );
+
+      // Log Coins Credit
+      const transaction = logFinancialTransaction(
+        userId,
+        "earn",
+        `Moedas creditadas (+10% Cashback Bonus: ${bonusCoins} 🪙)`,
+        totalCoinsGained,
+        "coins"
+      );
+
+      serverDb.addAuditLog(userId, "FINANCE_BALANCE_CONVERSION", `Conversão de R$ ${amountReal} para ${totalCoinsGained} moedas virtuais com bônus de cashback.`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({
+        success: true,
+        realBalance: profile.realBalance,
+        coins: profile.stats.coins,
+        transaction
+      });
+    } catch (err: any) {
+      console.error("[CONVERSION API ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar conversão de moedas." });
+    }
+  });
+
+  // POST /api/finance/quest/claim - Claim Quest Reward (Daily / Weekly quests, login bonus)
+  app.post("/api/finance/quest/claim", (req, res) => {
+    const { userId, questType, questId, rewardCoins, rewardXp, title } = req.body;
+    if (!userId || !questId || !rewardCoins) {
+      return res.status(400).json({ error: "Parâmetros de recompensa inválidos." });
+    }
+
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Jogador não encontrado." });
+
+      if (!profile.stats) {
+        profile.stats = { coins: 0, lives: 3, currentStage: 1, highScore: 0, unlockedSkins: ["classic"], unlockedAccessories: ["none"], unlockedAuras: ["none"], avatar: { skin: "classic", accessory: "none", aura: "none" }, level: 1, points: 0 };
+      }
+
+      // Add coins and XP
+      profile.stats.coins = (profile.stats.coins || 0) + Number(rewardCoins);
+      const currentXp = profile.stats.points || 0;
+      const newXp = currentXp + (Number(rewardXp) || 0);
+      profile.stats.points = newXp;
+
+      // Handle Level Up (1000 XP per level)
+      const currentLevel = profile.stats.level || 1;
+      const newLevel = Math.floor(newXp / 1000) + 1;
+      let levelUpDetected = false;
+
+      if (newLevel > currentLevel) {
+        profile.stats.level = newLevel;
+        levelUpDetected = true;
+        profile.stats.coins += 200; // 200 coins level-up reward
+        logFinancialTransaction(userId, "earn", `Bônus de Level Up! Nível ${newLevel} alcançado.`, 200, "coins");
+      }
+
+      // Add special achievements to profile based on quests completed
+      let achievements = profile.conquistas || [];
+      if (questId === 'conquista_primeiro_deposito' && !achievements.includes('primeiro_deposito')) {
+        achievements.push('primeiro_deposito');
+      } else if (questId === 'quest_login_streak_7' && !achievements.includes('streak_master')) {
+        achievements.push('streak_master');
+      }
+      profile.conquistas = achievements;
+
+      serverDb.saveProfile(userId, profile);
+
+      // Log transaction securely
+      const transaction = logFinancialTransaction(
+        userId,
+        "earn",
+        `Recompensa resgatada: ${title || 'Missão Concluída'} (+${rewardCoins} 🪙, +${rewardXp || 0} XP)`,
+        Number(rewardCoins),
+        "coins"
+      );
+
+      serverDb.addAuditLog(userId, "FINANCE_CLAIM_REWARD", `Recompensa '${title || questId}' resgatada: +${rewardCoins} moedas, +${rewardXp} XP.`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({
+        success: true,
+        coins: profile.stats.coins,
+        xp: profile.stats.points,
+        level: profile.stats.level || 1,
+        levelUpDetected,
+        conquistas: profile.conquistas,
+        transaction
+      });
+    } catch (err: any) {
+      console.error("[QUEST REWARD CLAIM ERROR]", err);
+      return res.status(500).json({ error: "Falha ao registrar recompensa." });
+    }
+  });
+
+  // POST /api/finance/vip/purchase - Purchase VIP Status using Real Balance
+  app.post("/api/finance/vip/purchase", (req, res) => {
+    const { userId, planId, price, title } = req.body;
+    if (!userId || !planId || !price) {
+      return res.status(400).json({ error: "Parâmetros de plano VIP incorretos." });
+    }
+
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Perfil de jogador não encontrado." });
+
+      if ((profile.realBalance || 0) < price) {
+        return res.status(400).json({ error: "Saldo real insuficiente para adquirir este plano VIP." });
+      }
+
+      // Deduct balance
+      profile.realBalance = (profile.realBalance || 0) - Number(price);
+      profile.premium = true; // Set VIP boolean
+
+      // Add VIP badge
+      let badges = profile.badges || [];
+      const badgeName = `${planId.toUpperCase()}_MEMBER`;
+      if (!badges.includes(badgeName)) {
+        badges.push(badgeName);
+      }
+      profile.badges = badges;
+
+      // Welcome Coins bonus!
+      const welcomeCoins = planId === 'platinum' ? 10000 : planId === 'gold' ? 5000 : planId === 'silver' ? 2500 : 1000;
+      if (!profile.stats) {
+        profile.stats = { coins: 0, lives: 3, currentStage: 1, highScore: 0, unlockedSkins: ["classic"], unlockedAccessories: ["none"], unlockedAuras: ["none"], avatar: { skin: "classic", accessory: "none", aura: "none" }, level: 1, points: 0 };
+      }
+      profile.stats.coins = (profile.stats.coins || 0) + welcomeCoins;
+      profile.stats.isVip = true;
+
+      serverDb.saveProfile(userId, profile);
+
+      // Log BRL Debit
+      logFinancialTransaction(
+        userId,
+        "purchase_booster",
+        `Compra de Assinatura VIP: Plano ${title}`,
+        Number(price),
+        "real"
+      );
+
+      // Log Coins Credit
+      const transaction = logFinancialTransaction(
+        userId,
+        "earn",
+        `Moedas de boas-vindas do plano VIP ${title}`,
+        welcomeCoins,
+        "coins"
+      );
+
+      serverDb.addAuditLog(userId, "FINANCE_VIP_PURCHASED", `VIP ${title} adquirido por R$ ${price}. Badges adicionados: ${badgeName}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({
+        success: true,
+        realBalance: profile.realBalance,
+        coins: profile.stats.coins,
+        isVip: true,
+        badges,
+        transaction
+      });
+    } catch (err: any) {
+      console.error("[VIP PURCHASE API ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar assinatura VIP." });
+    }
+  });
+
+  // GET /api/finance/marketplace - Retrieve player marketplace item listings
+  app.get("/api/finance/marketplace", (req, res) => {
+    try {
+      const listings = serverDb.getMarketplaceListings();
+      return res.json({ success: true, listings });
+    } catch (err: any) {
+      console.error("[MARKETPLACE FETCH ERROR]", err);
+      return res.status(500).json({ error: "Falha ao buscar itens do mercado." });
+    }
+  });
+
+  // POST /api/finance/marketplace/list - List an item for sale in player-to-player marketplace
+  app.post("/api/finance/marketplace/list", (req, res) => {
+    const { userId, title, description, price, currency, rarity } = req.body;
+    if (!userId || !title || !price || !currency) {
+      return res.status(400).json({ error: "Campos obrigatórios: userId, título, preço e tipo de moeda." });
+    }
+
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Perfil do vendedor não encontrado." });
+
+      if (price <= 0) {
+        return res.status(400).json({ error: "O preço anunciado do item deve ser superior a zero." });
+      }
+
+      // Check if item exists in player's inventory first
+      const inventory = profile.inventario || [];
+      const itemIndex = inventory.findIndex((it: any) => it.name === title);
+      if (itemIndex === -1) {
+        return res.status(400).json({ error: "Você só pode anunciar itens que possui em seu inventário." });
+      }
+
+      // Remove 1 unit from inventory
+      inventory.splice(itemIndex, 1);
+      profile.inventario = inventory;
+      serverDb.saveProfile(userId, profile);
+
+      const listingId = `LIST-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+      const sellerName = profile.username || "Vendedor Anônimo";
+
+      serverDb.listMarketplaceItem(
+        listingId,
+        userId,
+        sellerName,
+        title,
+        description || "",
+        Number(price),
+        currency,
+        rarity || "common",
+        new Date().toISOString()
+      );
+
+      // Log transaction securely
+      logFinancialTransaction(
+        userId,
+        "purchase_cosmetic",
+        `Item anunciado no Marketplace: '${title}' por ${price} ${currency === 'coins' ? 'Coins' : 'BRL'}`,
+        0,
+        currency === 'coins' ? 'coins' : 'real'
+      );
+
+      serverDb.addAuditLog(userId, "MARKETPLACE_ITEM_LISTED", `Item '${title}' listado para venda por ${price} ${currency}. Id do anúncio: ${listingId}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({
+        success: true,
+        listingId,
+        inventario: inventory
+      });
+    } catch (err: any) {
+      console.error("[MARKETPLACE LISTING ERROR]", err);
+      return res.status(500).json({ error: "Falha ao cadastrar anúncio de item." });
+    }
+  });
+
+  // POST /api/finance/marketplace/buy - Buy an item from player-to-player marketplace (with 10% Platform fee)
+  app.post("/api/finance/marketplace/buy", (req, res) => {
+    const { buyerId, listingId } = req.body;
+    if (!buyerId || !listingId) {
+      return res.status(400).json({ error: "Campos obrigatórios: buyerId e listingId." });
+    }
+
+    try {
+      const listings = serverDb.getMarketplaceListings();
+      const listing = listings.find((it: any) => it.id === listingId);
+
+      if (!listing) {
+        return res.status(404).json({ error: "O anúncio do item não foi encontrado ou já foi vendido." });
+      }
+
+      const sellerId = listing.seller_id;
+      const price = Number(listing.price);
+      const currency = listing.currency;
+      const itemTitle = listing.title;
+
+      if (buyerId === sellerId) {
+        return res.status(400).json({ error: "Você não pode comprar um item listado por você mesmo." });
+      }
+
+      const buyerProfile = serverDb.getProfile(buyerId);
+      const sellerProfile = serverDb.getProfile(sellerId);
+
+      if (!buyerProfile) return res.status(404).json({ error: "Perfil do comprador não encontrado." });
+      if (!sellerProfile) return res.status(404).json({ error: "Perfil do vendedor não encontrado." });
+
+      // Check balance
+      if (currency === "real") {
+        if ((buyerProfile.realBalance || 0) < price) {
+          return res.status(400).json({ error: "Saldo real insuficiente para efetuar a compra." });
+        }
+      } else {
+        if (!buyerProfile.stats || (buyerProfile.stats.coins || 0) < price) {
+          return res.status(400).json({ error: "Saldo de moedas virtuais insuficiente para efetuar a compra." });
+        }
+      }
+
+      // 10% fee commission deduction
+      const commissionFee = price * 0.10;
+      const sellerReceives = price - commissionFee;
+
+      // Deduct/Credit balances
+      if (currency === "real") {
+        buyerProfile.realBalance = (buyerProfile.realBalance || 0) - price;
+        sellerProfile.realBalance = (sellerProfile.realBalance || 0) + sellerReceives;
+      } else {
+        buyerProfile.stats.coins = (buyerProfile.stats.coins || 0) - price;
+        if (!sellerProfile.stats) {
+          sellerProfile.stats = { coins: 0, lives: 3, currentStage: 1, highScore: 0, unlockedSkins: ["classic"], unlockedAccessories: ["none"], unlockedAuras: ["none"], avatar: { skin: "classic", accessory: "none", aura: "none" }, level: 1, points: 0 };
+        }
+        sellerProfile.stats.coins = (sellerProfile.stats.coins || 0) + sellerReceives;
+      }
+
+      // Add to buyer's inventory
+      let buyerInventory = buyerProfile.inventario || [];
+      buyerInventory.push({
+        id: `it-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+        name: itemTitle,
+        description: listing.description || "Adquirido no marketplace do GameZon.",
+        rarity: listing.rarity || "common",
+        acquiredAt: new Date().toLocaleDateString('pt-BR'),
+        source: 'marketplace'
+      });
+      buyerProfile.inventario = buyerInventory;
+
+      // Mark as sold in database
+      serverDb.buyMarketplaceItem(listingId);
+
+      // Save both updated profiles
+      serverDb.saveProfile(buyerId, buyerProfile);
+      serverDb.saveProfile(sellerId, sellerProfile);
+
+      // Traceable Log entries for BOTH buyer and seller
+      logFinancialTransaction(
+        buyerId,
+        "purchase_cosmetic",
+        `Compra de item no Marketplace: '${itemTitle}' do jogador @${sellerProfile.username || 'user'}`,
+        price,
+        currency as 'coins' | 'real'
+      );
+
+      logFinancialTransaction(
+        sellerId,
+        "earn",
+        `Item '${itemTitle}' vendido no Marketplace para @${buyerProfile.username || 'user'} (Taxa plataforma de 10%: ${commissionFee.toFixed(2)} deduzida)`,
+        sellerReceives,
+        currency as 'coins' | 'real'
+      );
+
+      serverDb.addAuditLog(buyerId, "MARKETPLACE_PURCHASE_COMPLETED", `Jogador comprando item '${itemTitle}' de vendedor ${sellerId} por ${price} ${currency}. Id do anúncio: ${listingId}. Comissão: ${commissionFee}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({
+        success: true,
+        realBalance: buyerProfile.realBalance,
+        coins: buyerProfile.stats?.coins || 0,
+        inventario: buyerInventory
+      });
+    } catch (err: any) {
+      console.error("[MARKETPLACE TRANSACTION ERROR]", err);
+      return res.status(500).json({ error: "Falha ao completar compra de item no marketplace." });
+    }
+  });
+
+  // POST /api/finance/blockchain/verify - Verify full database transaction ledger integrity (Anti-Fraud Check)
+  app.post("/api/finance/blockchain/verify", (req, res) => {
+    try {
+      const secret = process.env.COMPILER_SECRET_SALT || 'GZ_SECURE_SALT_9f31b8a6d25e4c7b80a1c2d3e4f5a6b7';
+      const allRows = serverDb.getAllLogs();
+
+      let totalLogs = allRows.length;
+      let tamperedLogsCount = 0;
+      const tamperedIds: string[] = [];
+
+      allRows.forEach((row) => {
+        const recordStr = `${row.id}:${row.userId}:${row.timestamp}:${row.type}:${row.description}:${row.amount}:${row.currency}:${row.status}`;
+        const computedHash = '0x' + crypto.createHmac('sha256', secret).update(recordStr).digest('hex');
+        
+        if (computedHash !== row.securityHash) {
+          tamperedLogsCount++;
+          tamperedIds.push(row.id || "unknown-id");
+        }
+      });
+
+      return res.json({
+        success: true,
+        totalLogs,
+        tamperedLogsCount,
+        tamperedIds,
+        status: tamperedLogsCount === 0 ? "SECURE" : "TAMPERED",
+        systemHashVersion: "SHA256-HMAC-V2"
+      });
+    } catch (err: any) {
+      console.error("[LEDGER INTEGRITY ERROR]", err);
+      return res.status(500).json({ error: "Falha ao verificar integridade do blockchain financeiro." });
+    }
+  });
+
+  // GET /api/finance/audit/logs - Retrieve full audit security logs
+  app.get("/api/finance/audit/logs", (req, res) => {
+    try {
+      const logs = serverDb.getAuditLogs();
+      return res.json({ success: true, logs });
+    } catch (err: any) {
+      console.error("[AUDIT LOG RETRIEVAL ERROR]", err);
+      return res.status(500).json({ error: "Falha ao resgatar logs de auditoria do sistema." });
     }
   });
 

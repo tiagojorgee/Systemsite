@@ -22,6 +22,9 @@ const GamezoneShop = lazy(() => import('./components/GamezoneShop').then(m => ({
 const Feed = lazy(() => import('./components/Feed').then(m => ({ default: m.Feed })));
 const ChatPortal = lazy(() => import('./components/ChatPortal').then(m => ({ default: m.ChatPortal })));
 const ProfilePortal = lazy(() => import('./components/ProfilePortal').then(m => ({ default: m.ProfilePortal })));
+const EcosystemDashboard = lazy(() => import('./components/EcosystemDashboard').then(m => ({ default: m.EcosystemDashboard })));
+const SecurityCenter = lazy(() => import('./components/SecurityCenter').then(m => ({ default: m.SecurityCenter })));
+const FinancePortal = lazy(() => import('./components/FinancePortal').then(m => ({ default: m.FinancePortal })));
 
 interface TabLoaderProps {
   tabName: string;
@@ -37,6 +40,8 @@ const TabLoader = ({ tabName }: TabLoaderProps) => {
     cinema: 'Cine Lounge & Vídeos',
     gamezoneshop: 'GamezoneShop E-commerce',
     feed: 'Feed da Arena de Jogadores',
+    security: 'Central de Segurança e Conformidade',
+    finance: 'Painel Financeiro & Auditoria Criptográfica'
   };
 
   return (
@@ -65,8 +70,26 @@ const TabLoader = ({ tabName }: TabLoaderProps) => {
 };
 
 export default function App() {
-  // Tabs: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed'
-  const [activeTab, setActiveTab] = useState<'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed'>('feed');
+  // Tabs: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance'
+  const [activeTab, setActiveTab] = useState<'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance'>('modules');
+
+  // Theme support
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const cachedTheme = localStorage.getItem('gamezone_theme') as 'light' | 'dark';
+    if (cachedTheme === 'light' || cachedTheme === 'dark') {
+      return cachedTheme;
+    }
+    return 'light';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('gamezone_theme', theme);
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [theme]);
 
   // User Authentication States
   const [loggedInUser, setLoggedInUser] = useState<AppUser | null>(() => {
@@ -661,7 +684,7 @@ export default function App() {
     }
   }, [activeTab]);
 
-  const handlePrefetchTab = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop') => {
+  const handlePrefetchTab = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance') => {
     switch (tab) {
       case 'games':
         import('./components/GamePortal');
@@ -684,11 +707,17 @@ export default function App() {
       case 'gamezoneshop':
         import('./components/GamezoneShop');
         break;
+      case 'security':
+        import('./components/SecurityCenter');
+        break;
+      case 'finance':
+        import('./components/FinancePortal');
+        break;
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans relative overflow-x-hidden transition-colors duration-300">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans relative overflow-x-hidden transition-colors duration-300">
       
       {/* Decorative Fluid Ambient Glowing Backdrops */}
       <div className="absolute top-[-15%] left-[-15%] w-[60%] h-[50%] rounded-full bg-indigo-500/10 blur-[130px] pointer-events-none animate-float" />
@@ -713,6 +742,8 @@ export default function App() {
         onOpenAuthModal={() => setShowAuthModal(true)}
         onPrefetchTab={handlePrefetchTab}
         unreadCount={unreadCount}
+        theme={theme}
+        setTheme={setTheme}
       />
 
       {/* App-level Toast notifications */}
@@ -832,6 +863,59 @@ export default function App() {
               onOpenLogin={() => setShowAuthModal(true)}
               stats={stats}
               updateStats={updateStats}
+            />
+          )}
+
+          {activeTab === 'modules' && (
+            <EcosystemDashboard
+              loggedInUser={loggedInUser}
+              stats={stats}
+              realBalance={realBalance}
+              logs={logs}
+              onTriggerToast={triggerToast}
+              onRefreshUserData={() => {
+                if (loggedInUser) {
+                  const userId = getCleanUserId(loggedInUser);
+                  if (userId) {
+                    getUserProfile(userId).then((profile) => {
+                      if (profile) {
+                        setStats(profile.stats);
+                        setRealBalance(profile.realBalance);
+                        setWithdrawLimit(profile.withdrawLimit);
+                      }
+                    }).catch(err => console.error('Error refreshing stats:', err));
+                    
+                    getUserLogs(userId).then((userLogs) => {
+                      if (userLogs && userLogs.length > 0) {
+                        setLogs(userLogs);
+                      }
+                    }).catch(err => console.error('Error refreshing logs:', err));
+                  }
+                }
+              }}
+            />
+          )}
+
+          {activeTab === 'security' && (
+            <div className="p-3 md:p-6 max-w-5xl mx-auto">
+              <SecurityCenter
+                user={loggedInUser}
+                onUserUpdate={(updated) => setLoggedInUser(updated)}
+                onLogout={handleLogout}
+              />
+            </div>
+          )}
+
+          {activeTab === 'finance' && (
+            <FinancePortal
+              stats={stats}
+              updateStats={(newStats) => setStats(newStats)}
+              loggedInUser={loggedInUser ? loggedInUser.uid : null}
+              onOpenLogin={() => setShowAuthModal(true)}
+              realBalance={realBalance}
+              setRealBalance={setRealBalance}
+              logs={logs}
+              setLogs={setLogs}
             />
           )}
         </Suspense>
