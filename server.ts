@@ -2099,43 +2099,289 @@ async function startServer() {
     }
   });
 
-  // GET /api/user/notifications - Fetch new messages, followers, and active store promotions
+  // GET /api/user/notifications - Fetch new messages, followers, and active store promotions (legacy compatibility)
   app.get("/api/user/notifications", (req, res) => {
-    const { userId, lastChecked } = req.query;
+    const { userId } = req.query;
     if (!userId) {
       return res.status(400).json({ error: "O campo userId é obrigatório." });
     }
-
     try {
-      let newMessages: any[] = [];
-      if (lastChecked) {
-        newMessages = serverDb.getNewMessagesForReceiver(userId as string, lastChecked as string);
+      const notifications = serverDb.getNotifications(userId as string);
+      const unreadCount = notifications.filter((n: any) => !n.is_read && !n.deleted_at).length;
+      return res.json({
+        success: true,
+        newMessages: [],
+        followers: [],
+        promotion: null,
+        unreadCount
+      });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao buscar notificações." });
+    }
+  });
+
+  // GET /api/notifications - Central de notificações unificada: busca todas, preferências e e-mails enviados
+  app.get("/api/notifications", (req, res) => {
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ error: "O campo userId é obrigatório." });
+    }
+    try {
+      const uId = userId as string;
+      
+      // Default preferences object
+      let preferencesObj = {
+        system: { inApp: true, push: true, email: true },
+        friendship: { inApp: true, push: true, email: false },
+        messages: { inApp: true, push: true, email: false },
+        marketplace: { inApp: true, push: true, email: true },
+        games: { inApp: true, push: true, email: false },
+        streaming: { inApp: true, push: false, email: false },
+        finance: { inApp: true, push: true, email: true },
+        achievements: { inApp: true, push: false, email: true },
+        events: { inApp: true, push: true, email: true },
+        subscriptions: { inApp: true, push: true, email: true }
+      };
+
+      const prefRow = serverDb.getNotificationPreferences(uId) as any;
+      if (prefRow) {
+        try {
+          preferencesObj = JSON.parse(prefRow.preferences);
+        } catch (e) {}
+      } else {
+        serverDb.saveNotificationPreferences(uId, JSON.stringify(preferencesObj), new Date().toISOString());
       }
 
-      // Check current followers from profile
-      const profile = serverDb.getProfile(userId as string);
-      const followers = profile?.followers || [];
+      let notifications = serverDb.getNotifications(uId);
 
-      // Dynamic store promotions
-      const promos = [
-        { id: "promo-vip-1", title: "👑 Bônus VIP Ativo na Loja!", body: "Adquira moedas ou vidas com 15% de cashback na carteira agora!" },
-        { id: "promo-skin-2", title: "🎨 Novidades no Customizador de Piloto!", body: "Novos trajes e auras brilhantes foram adicionados para customização." },
-        { id: "promo-football-3", title: "⚽ Rodada de Palpites Liberada!", body: "Dobre suas moedas palpitando nos clássicos de futebol desta semana!" },
-        { id: "promo-cinema-4", title: "🍿 Cine Lounge tem novos trailers!", body: "Venha assistir aos lançamentos e interagir no chat coletivo do lounge!" }
-      ];
-      
-      const currentMinute = new Date().getMinutes();
-      const promotion = promos[currentMinute % promos.length];
+      // If user has 0 notifications, seed initial ones for outstanding visual representation
+      if (notifications.length === 0) {
+        const now = new Date();
+        const seedData = [
+          {
+            id: "seed-sys-1",
+            title: "🛠️ Manutenção Concluída",
+            body: "O sistema foi atualizado para a versão v2.4.0 com melhorias críticas de criptografia e performance.",
+            type: "system",
+            offsetMin: 2
+          },
+          {
+            id: "seed-friend-1",
+            title: "👥 Nova Solicitação de Amizade",
+            body: "Felipe Play (@felipe_play) enviou uma solicitação de amizade para você.",
+            type: "friendship",
+            offsetMin: 5
+          },
+          {
+            id: "seed-msg-1",
+            title: "💬 Nova Mensagem de Chat",
+            body: "Juliana Santos: 'Ei, vamos testar o novo simulador de apostas esportivas hoje?'",
+            type: "messages",
+            offsetMin: 12
+          },
+          {
+            id: "seed-market-1",
+            title: "🛍️ Produto Vendido no Marketplace",
+            body: "Seu item 'Capacete de Titânio Carbono' foi arrematado por 280 moedas de ouro.",
+            type: "marketplace",
+            offsetMin: 25
+          },
+          {
+            id: "seed-game-1",
+            title: "🎮 Torneio de Aviador Iniciado",
+            body: "O Torneio Relâmpago de Aviador começou! Multiplicadores acima de 10x dão bônus duplo de moedas.",
+            type: "games",
+            offsetMin: 40
+          },
+          {
+            id: "seed-stream-1",
+            title: "📺 Streamer Oficial Ao Vivo",
+            body: "Darlan_GZ está jogando roleta em tempo real no Lounge Cinema. Conecte-se e faça seu palpite!",
+            type: "streaming",
+            offsetMin: 60
+          },
+          {
+            id: "seed-finance-1",
+            title: "💰 Depósito via Pix Confirmado",
+            body: "Seu depósito de R$ 50,00 foi processado com sucesso. Saldo de R$ 50,00 creditado na conta.",
+            type: "finance",
+            offsetMin: 90
+          },
+          {
+            id: "seed-ach-1",
+            title: "🏆 Conquista Desbloqueada!",
+            body: "Mestre da Sorte: Você efetuou mais de 50 apostas corretas nos simuladores! Ganhou +100 moedas.",
+            type: "achievements",
+            offsetMin: 120
+          },
+          {
+            id: "seed-ev-1",
+            title: "📅 Evento Especial de Final de Semana",
+            body: "Neste fim de semana, a taxa de administração do Marketplace será reduzida a 0%! Aproveite para anunciar.",
+            type: "events",
+            offsetMin: 180
+          },
+          {
+            id: "seed-sub-1",
+            title: "💎 Assinatura VIP Ativada",
+            body: "Parabéns! Sua assinatura VIP está ativa. Limite de saques diários estendido para R$ 1.000,00.",
+            type: "subscriptions",
+            offsetMin: 240
+          }
+        ];
+
+        for (const item of seedData) {
+          const itemTime = new Date(now.getTime() - item.offsetMin * 60 * 1000).toISOString();
+          serverDb.addNotification(item.id, uId, item.title, item.body, item.type, itemTime);
+        }
+
+        notifications = serverDb.getNotifications(uId);
+      }
+
+      const emails = serverDb.getSentEmails(uId);
 
       return res.json({
         success: true,
-        newMessages,
-        followers,
-        promotion
+        notifications,
+        preferences: preferencesObj,
+        emails
       });
     } catch (err: any) {
       console.error("[GET NOTIFICATIONS ERROR]", err);
-      return res.status(500).json({ error: "Erro ao buscar notificações." });
+      return res.status(500).json({ error: "Erro ao carregar central de notificações." });
+    }
+  });
+
+  // POST /api/notifications/create - Criar nova notificação simulando disparo em tempo real
+  app.post("/api/notifications/create", (req, res) => {
+    const { userId, title, body, type } = req.body;
+    if (!userId || !title || !body || !type) {
+      return res.status(400).json({ error: "Campos obrigatórios: userId, title, body, type." });
+    }
+    try {
+      const uId = userId as string;
+      const now = new Date().toISOString();
+      const nId = "not-" + Math.random().toString(36).substring(2, 11);
+
+      const userObj = serverDb.getUser(uId);
+      const emailAddress = userObj?.email || "usuario@gamezone.com";
+
+      let preferencesObj: any = {
+        system: { inApp: true, push: true, email: true },
+        friendship: { inApp: true, push: true, email: false },
+        messages: { inApp: true, push: true, email: false },
+        marketplace: { inApp: true, push: true, email: true },
+        games: { inApp: true, push: true, email: false },
+        streaming: { inApp: true, push: false, email: false },
+        finance: { inApp: true, push: true, email: true },
+        achievements: { inApp: true, push: false, email: true },
+        events: { inApp: true, push: true, email: true },
+        subscriptions: { inApp: true, push: true, email: true }
+      };
+
+      const prefRow = serverDb.getNotificationPreferences(uId) as any;
+      if (prefRow) {
+        try {
+          preferencesObj = JSON.parse(prefRow.preferences);
+        } catch (e) {}
+      }
+
+      const typePref = preferencesObj[type] || { inApp: true, push: true, email: true };
+
+      let inAppSaved = false;
+      let emailSent = false;
+      let pushSent = false;
+
+      if (typePref.inApp) {
+        serverDb.addNotification(nId, uId, title, body, type, now);
+        inAppSaved = true;
+      }
+
+      if (typePref.push) {
+        pushSent = true;
+      }
+
+      if (typePref.email) {
+        const emailId = "eml-" + Math.random().toString(36).substring(2, 11);
+        serverDb.addSentEmail(emailId, uId, emailAddress, title, `Olá ${userObj?.name || 'Jogador'},\n\nVocê tem uma nova notificação do tipo ${type}:\n\n${body}\n\nAtenciosamente,\nEquipe GameZone`, now, "Enviado");
+        emailSent = true;
+      }
+
+      return res.json({
+        success: true,
+        id: nId,
+        inAppSaved,
+        emailSent,
+        pushSent,
+        message: "Notificação disparada de acordo com as preferências do usuário."
+      });
+    } catch (err: any) {
+      console.error("[CREATE NOTIFICATION ERROR]", err);
+      return res.status(500).json({ error: "Erro ao criar notificação." });
+    }
+  });
+
+  // POST /api/notifications/mark-read - Marcar como lida (única ou todas)
+  app.post("/api/notifications/mark-read", (req, res) => {
+    const { id, userId } = req.body;
+    try {
+      if (id === "all" && userId) {
+        serverDb.markAllNotificationsRead(userId);
+        return res.json({ success: true, message: "Todas as notificações marcadas como lidas." });
+      } else if (id) {
+        serverDb.markNotificationRead(id, 1);
+        return res.json({ success: true, message: "Notificação marcada como lida." });
+      } else {
+        return res.status(400).json({ error: "Parâmetros inválidos." });
+      }
+    } catch (err: any) {
+      console.error("[MARK READ ERROR]", err);
+      return res.status(500).json({ error: "Erro ao marcar notificações como lidas." });
+    }
+  });
+
+  // POST /api/notifications/archive - Arquivar notificação
+  app.post("/api/notifications/archive", (req, res) => {
+    const { id } = req.body;
+    if (!id) {
+      return res.status(400).json({ error: "O id da notificação é obrigatório." });
+    }
+    try {
+      serverDb.archiveNotification(id, new Date().toISOString());
+      return res.json({ success: true, message: "Notificação arquivada com sucesso." });
+    } catch (err: any) {
+      console.error("[ARCHIVE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao arquivar notificação." });
+    }
+  });
+
+  // POST /api/notifications/delete - Excluir permanentemente
+  app.post("/api/notifications/delete", (req, res) => {
+    const { id } = req.body;
+    if (!id) {
+      return res.status(400).json({ error: "O id da notificação é obrigatório." });
+    }
+    try {
+      serverDb.deleteNotification(id);
+      return res.json({ success: true, message: "Notificação excluída permanentemente." });
+    } catch (err: any) {
+      console.error("[DELETE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao excluir notificação." });
+    }
+  });
+
+  // POST /api/notifications/preferences - Salvar configurações do usuário
+  app.post("/api/notifications/preferences", (req, res) => {
+    const { userId, preferences } = req.body;
+    if (!userId || !preferences) {
+      return res.status(400).json({ error: "userId e preferences são obrigatórios." });
+    }
+    try {
+      serverDb.saveNotificationPreferences(userId, JSON.stringify(preferences), new Date().toISOString());
+      return res.json({ success: true, message: "Preferências de notificação atualizadas." });
+    } catch (err: any) {
+      console.error("[PREFERENCES ERROR]", err);
+      return res.status(500).json({ error: "Erro ao salvar preferências." });
     }
   });
 
@@ -2947,6 +3193,632 @@ async function startServer() {
     } catch (err: any) {
       console.error("[AUDIT LOG RETRIEVAL ERROR]", err);
       return res.status(500).json({ error: "Falha ao resgatar logs de auditoria do sistema." });
+    }
+  });
+
+  // --- INTEGRATED PAYMENTS INFRASTRUCTURE ENDPOINTS (stripe, paypal, mercadopago, pix, card) ---
+
+  // POST /api/payments/coupon/validate - Validate coupon code
+  app.post("/api/payments/coupon/validate", (req, res) => {
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ error: "O código do cupom é obrigatório." });
+    }
+    try {
+      const coupon = (serverDb as any).getCouponByCode(code.toUpperCase());
+      if (!coupon) {
+        return res.status(400).json({ error: "Cupom inválido ou já expirado." });
+      }
+      return res.json({ success: true, coupon });
+    } catch (err: any) {
+      console.error("[COUPON VALIDATION ERROR]", err);
+      return res.status(500).json({ error: "Falha ao validar cupom." });
+    }
+  });
+
+  // POST /api/payments/affiliate/register - Register a referral link
+  app.post("/api/payments/affiliate/register", (req, res) => {
+    const { affiliateId, referredUserId } = req.body;
+    if (!affiliateId || !referredUserId) {
+      return res.status(400).json({ error: "ID do afiliado e ID do convidado são obrigatórios." });
+    }
+    if (affiliateId === referredUserId) {
+      return res.status(400).json({ error: "Você não pode se auto-convidar como afiliado." });
+    }
+    try {
+      const id = `aff-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      (serverDb as any).addAffiliateReferral(id, affiliateId, referredUserId, 'pending', new Date().toISOString());
+      serverDb.addAuditLog(referredUserId, "PAYMENTS_AFFILIATE_LINKED", `Usuário convidado vinculado ao padrinho de indicação: ${affiliateId}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, message: "Padrinho de indicação vinculado com sucesso." });
+    } catch (err: any) {
+      console.error("[AFFILIATE REGISTER ERROR]", err);
+      return res.status(500).json({ error: "Falha ao registrar indicação de afiliado." });
+    }
+  });
+
+  // POST /api/payments/affiliate/stats - Fetch affiliate statistics
+  app.post("/api/payments/affiliate/stats", (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "O campo userId é obrigatório." });
+    }
+    try {
+      const referrals = (serverDb as any).getAffiliateReferrals(userId);
+      const commissions = (serverDb as any).getAffiliateCommissions(userId);
+      const totalEarnings = commissions.reduce((sum: number, c: any) => sum + c.amount, 0);
+
+      return res.json({
+        success: true,
+        referrals,
+        commissions,
+        totalEarnings
+      });
+    } catch (err: any) {
+      console.error("[AFFILIATE STATS ERROR]", err);
+      return res.status(500).json({ error: "Falha ao resgatar estatísticas de afiliado." });
+    }
+  });
+
+  // POST /api/payments/invoice/list - Retrieve invoices for user
+  app.post("/api/payments/invoice/list", (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "O campo userId é obrigatório." });
+    }
+    try {
+      const invoices = (serverDb as any).getInvoices(userId);
+      return res.json({ success: true, invoices });
+    } catch (err: any) {
+      console.error("[INVOICE LIST ERROR]", err);
+      return res.status(500).json({ error: "Falha ao resgatar faturas." });
+    }
+  });
+
+  // POST /api/payments/invoice/create-future - Issue a future bill / billing note
+  app.post("/api/payments/invoice/create-future", (req, res) => {
+    const { userId, amount, dueDate } = req.body;
+    if (!userId || !amount || !dueDate) {
+      return res.status(400).json({ error: "ID de usuário, valor e data de vencimento são obrigatórios." });
+    }
+    try {
+      const id = `INV-${Date.now()}`;
+      const invoiceNumber = `FAT-${Math.floor(100000 + Math.random() * 900000)}`;
+      const issueDate = new Date().toISOString().split('T')[0];
+      const pdfContent = `
+=== GAMEZON FATURA DE COBRANÇA FUTURA ===
+Número da Fatura: ${invoiceNumber}
+ID do Cliente: ${userId}
+Emissão: ${issueDate}
+Vencimento: ${dueDate}
+Valor Cobrado: R$ ${Number(amount).toFixed(2)}
+Status: PENDENTE (Fatura Futura Provisionada)
+Ambiente: Produção Segura PCI-DSS v4.0
+=========================================
+`;
+      (serverDb as any).createInvoice(id, invoiceNumber, userId, Number(amount), 'pending', issueDate, dueDate, 'futura', pdfContent, new Date().toISOString());
+      serverDb.addAuditLog(userId, "PAYMENTS_INVOICE_FUTURE_CREATED", `Fatura de cobrança futura provisionada no valor de R$ ${amount}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, invoice: { id, invoiceNumber, userId, amount, status: 'pending', issueDate, dueDate, type: 'futura', pdfContent } });
+    } catch (err: any) {
+      console.error("[FUTURE INVOICE CREATE ERROR]", err);
+      return res.status(500).json({ error: "Falha ao provisionar fatura futura." });
+    }
+  });
+
+  // POST /api/payments/refund - Process payments refunds / cancelations
+  app.post("/api/payments/refund", (req, res) => {
+    const { transactionId, userId } = req.body;
+    if (!transactionId || !userId) {
+      return res.status(400).json({ error: "ID da transação e ID de usuário são obrigatórios." });
+    }
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Perfil de jogador não encontrado." });
+
+      const logs = serverDb.getLogs(userId) || [];
+      const txn = logs.find((l: any) => l.id === transactionId);
+      if (!txn) {
+        return res.status(404).json({ error: "Transação financeira não encontrada." });
+      }
+      if (txn.status === 'refunded') {
+        return res.status(400).json({ error: "Esta transação já foi reembolsada anteriormente." });
+      }
+
+      const amount = txn.amount;
+      if (txn.currency === 'real') {
+        profile.realBalance = Math.max(0, (profile.realBalance || 0) - amount);
+      } else {
+        if (profile.stats) {
+          profile.stats.coins = Math.max(0, (profile.stats.coins || 0) - amount);
+        }
+      }
+
+      txn.status = 'refunded';
+      txn.description = `[REEMBOLSADO] ${txn.description}`;
+      serverDb.saveProfile(userId, profile);
+
+      const invoices = (serverDb as any).getInvoices(userId) || [];
+      const invoice = invoices.find((inv: any) => inv.amount === amount || inv.invoice_number.includes(transactionId.split('-')[1] || 'XYZ'));
+      if (invoice) {
+        (serverDb as any).updateInvoiceStatus(invoice.id, 'refunded');
+      }
+
+      logFinancialTransaction(
+        userId,
+        "stage_skip",
+        `Reembolso Aprovado: Transação ${transactionId}`,
+        amount,
+        txn.currency
+      );
+
+      serverDb.addAuditLog(userId, "PAYMENTS_REFUND_APPROVED", `Reembolso de R$ ${amount} aprovado para transação ${transactionId}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({
+        success: true,
+        realBalance: profile.realBalance,
+        coins: profile.stats?.coins || 0,
+        message: "Estorno processado e saldo ajustado."
+      });
+    } catch (err: any) {
+      console.error("[REFUND ERROR]", err);
+      return res.status(500).json({ error: "Falha ao processar estorno de pagamento." });
+    }
+  });
+
+  // POST /api/payments/subscription/cancel - Cancel active recurring subscription
+  app.post("/api/payments/subscription/cancel", (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "ID de usuário é obrigatório." });
+    }
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Perfil de jogador não encontrado." });
+
+      profile.premium = false;
+      if (profile.stats) {
+        profile.stats.isVip = false;
+      }
+      serverDb.saveProfile(userId, profile);
+
+      serverDb.addAuditLog(userId, "PAYMENTS_SUBSCRIPTION_CANCELLED", `Assinatura VIP recorrente cancelada pelo usuário.`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({
+        success: true,
+        isVip: false,
+        message: "Sua assinatura recorrente foi cancelada com sucesso. Benefícios revogados."
+      });
+    } catch (err: any) {
+      console.error("[SUBSCRIPTION CANCEL ERROR]", err);
+      return res.status(500).json({ error: "Erro ao cancelar assinatura recorrente." });
+    }
+  });
+
+  // POST /api/payments/webhook/simulate - Simulate standard payment webhook callbacks (Stripe, Paypal, MercadoPago, Pix)
+  app.post("/api/payments/webhook/simulate", (req, res) => {
+    const { provider, eventType, amount, userId, couponCode, affiliateId, cardDetails } = req.body;
+    if (!provider || !eventType || !amount || !userId) {
+      return res.status(400).json({ error: "Campos obrigatórios: provedor, tipo de evento, valor e ID de usuário." });
+    }
+
+    try {
+      const profile = serverDb.getProfile(userId);
+      if (!profile) return res.status(404).json({ error: "Usuário destinatário não encontrado." });
+
+      let finalPrice = Number(amount);
+      let couponLog = "";
+
+      if (couponCode) {
+        const coupon = (serverDb as any).getCouponByCode(couponCode.toUpperCase());
+        if (coupon) {
+          if (coupon.type === 'percent') {
+            finalPrice = finalPrice * (1 - coupon.value / 100);
+          } else {
+            finalPrice = Math.max(0, finalPrice - coupon.value);
+          }
+          (serverDb as any).useCoupon(couponCode.toUpperCase());
+          couponLog = ` (Cupom: ${couponCode.toUpperCase()} aplicado - R$ ${coupon.value}${coupon.type === 'percent' ? '%' : ''} de desconto)`;
+        }
+      }
+
+      let pciMaskedNotes = "";
+      if (cardDetails && cardDetails.number) {
+        const maskedNum = `XXXX-XXXX-XXXX-${cardDetails.number.slice(-4)}`;
+        pciMaskedNotes = ` | Cartão mascarado (PCI-DSS): ${maskedNum} (Portador: ${cardDetails.name || 'GZ Player'})`;
+      }
+
+      profile.realBalance = (profile.realBalance || 0) + Number(finalPrice);
+      serverDb.saveProfile(userId, profile);
+
+      const txn = logFinancialTransaction(
+        userId,
+        "purchase_coins",
+        `Webhook ${provider.toUpperCase()}: Evento ${eventType}${couponLog}${pciMaskedNotes}`,
+        Number(finalPrice),
+        "real"
+      );
+
+      if (affiliateId && affiliateId !== userId) {
+        const commissionAmount = finalPrice * 0.10;
+        const affiliateProfile = serverDb.getProfile(affiliateId);
+        if (affiliateProfile) {
+          affiliateProfile.realBalance = (affiliateProfile.realBalance || 0) + commissionAmount;
+          serverDb.saveProfile(affiliateId, affiliateProfile);
+
+          const commissionId = `COM-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+          (serverDb as any).addCommission(commissionId, affiliateId, userId, txn.id, commissionAmount, 'paid', new Date().toISOString());
+
+          logFinancialTransaction(
+            affiliateId,
+            "earn",
+            `Comissão de Afiliado: 10% sobre o depósito do indicado ${profile.username || userId}`,
+            commissionAmount,
+            "real"
+          );
+
+          (serverDb as any).updateAffiliateReferralStatus(userId, 'active');
+          serverDb.addAuditLog(affiliateId, "PAYMENTS_AFFILIATE_COMMISSION_EARNED", `Comissão de R$ ${commissionAmount.toFixed(2)} recebida pela transação ${txn.id} do convidado ${userId}`, "webhook_engine", "");
+        }
+      }
+
+      const invoiceId = `INV-${Date.now()}`;
+      const invoiceNumber = `FAT-${Math.floor(100000 + Math.random() * 900000)}`;
+      const issueDate = new Date().toISOString().split('T')[0];
+      const dueDate = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().split('T')[0];
+      const pdfContent = `
+=========================================
+      GAMEZON FATURA FISCAL / RECIBO
+=========================================
+Número da Fatura: ${invoiceNumber}
+Provedor de Pagamento: ${provider.toUpperCase()}
+Método Utilizado: ${eventType.includes('card') ? 'Cartão de Crédito/Débito' : provider.toUpperCase()}
+ID do Cliente: ${userId}
+Emissão: ${issueDate}
+Valor Total Pago: R$ ${Number(finalPrice).toFixed(2)}
+Status: PAGO (Fatura Conciliada)
+Ambiente: Produção Segura PCI-DSS v4.0
+Detalhamento de Transação: ${txn.id}
+Assinatura Digital de Segurança: ${txn.securityHash}
+=========================================
+`;
+      (serverDb as any).createInvoice(invoiceId, invoiceNumber, userId, Number(finalPrice), 'paid', issueDate, dueDate, 'avulsa', pdfContent, new Date().toISOString());
+
+      const webhookId = `wh-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      (serverDb as any).addWebhookLog(
+        webhookId,
+        provider,
+        eventType,
+        JSON.stringify({ userId, originalAmount: amount, finalAmount: finalPrice, couponCode, txnId: txn.id, pciMaskedNotes }),
+        'processed',
+        200,
+        new Date().toISOString()
+      );
+
+      const conciliationId = `CONC-${Date.now()}`;
+      (serverDb as any).createOrUpdateConciliation(conciliationId, txn.id, 1, new Date().toISOString(), `Autoconciliado via Webhook Integrado. Tudo em ordem. Provedor: ${provider.toUpperCase()}`, finalPrice, finalPrice, 'matched');
+
+      serverDb.addAuditLog(userId, "PAYMENTS_WEBHOOK_PROCESSED", `Webhook de ${provider} processado com sucesso. Valor final creditado: R$ ${finalPrice}`, "webhook_engine", "");
+
+      return res.json({
+        success: true,
+        realBalance: profile.realBalance,
+        coins: profile.stats?.coins || 0,
+        transaction: txn
+      });
+    } catch (err: any) {
+      console.error("[WEBHOOK SIMULATOR ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar simulação de webhook de pagamentos." });
+    }
+  });
+
+  // GET /api/payments/webhook/logs - Retrieve webhook logs
+  app.get("/api/payments/webhook/logs", (req, res) => {
+    try {
+      const logs = (serverDb as any).getWebhookLogs();
+      return res.json({ success: true, logs });
+    } catch (err: any) {
+      console.error("[WEBHOOK LOGS RETRIEVAL ERROR]", err);
+      return res.status(500).json({ error: "Falha ao resgatar logs de webhooks." });
+    }
+  });
+
+  // GET /api/payments/conciliation/list - Retrieve conciliation records
+  app.get("/api/payments/conciliation/list", (req, res) => {
+    try {
+      const records = (serverDb as any).getConciliationRecords();
+      return res.json({ success: true, records });
+    } catch (err: any) {
+      console.error("[CONCILIATION RECORDS RETRIEVAL ERROR]", err);
+      return res.status(500).json({ error: "Falha ao resgatar registros de conciliação." });
+    }
+  });
+
+  // POST /api/payments/conciliation/action - Force manually reconcile transaction / solve discrepancy
+  app.post("/api/payments/conciliation/action", (req, res) => {
+    const { transactionId, action, providerAmount } = req.body;
+    if (!transactionId || !action || providerAmount === undefined) {
+      return res.status(400).json({ error: "Campos obrigatórios: transactionId, ação, valor do provedor." });
+    }
+
+    try {
+      const qResult = serverDb.runGenericQuery("SELECT * FROM logs WHERE id = ?", [transactionId]);
+      if (!qResult.success || !qResult.rows || qResult.rows.length === 0) {
+        return res.status(404).json({ error: "Transação original não encontrada no sistema." });
+      }
+
+      const txn = qResult.rows[0];
+      const systemAmount = txn.amount;
+      const isMatched = Math.abs(systemAmount - providerAmount) < 0.01;
+      const finalStatus = isMatched ? 'matched' : (action === 'reconcile' ? 'matched' : 'discrepancy');
+
+      const id = `CONC-${Date.now()}`;
+      (serverDb as any).createOrUpdateConciliation(
+        id,
+        transactionId,
+        action === 'reconcile' ? 1 : 0,
+        new Date().toISOString(),
+        `Ação de conciliação forçada via painel pelo Auditor. Diferença: R$ ${(systemAmount - providerAmount).toFixed(2)}`,
+        systemAmount,
+        providerAmount,
+        finalStatus
+      );
+
+      serverDb.addAuditLog("system_admin", "PAYMENTS_CONCILIATION_RESOLVED", `Transação ${transactionId} marcada como ${finalStatus} pelo auditor.`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ success: true, status: finalStatus });
+    } catch (err: any) {
+      console.error("[CONCILIATION ACTION ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar ação de conciliação." });
+    }
+  });
+
+  // --- MUTABLE GLOBAL CORPORATE ADMIN CONFIGURATIONS ---
+  let globalAdminConfigs = {
+    maintenanceMode: false,
+    rtpOverlay: "normal", // 'boost', 'normal', 'house_win'
+    affiliateRatePercent: 10,
+    simulatePaymentGateway: true,
+    customNotificationNotice: "Aviso Global: Painel de Controle Operando Estável.",
+    stripeKeySimulated: "sk_test_51Px...simulated_gamezone_2026",
+    paypalKeySimulated: "client_id_test_simulated_pay_v4",
+    payoutApprovalThreshold: 1000.00
+  };
+
+  // GET /api/admin/system-data - Aggregate state for Admin Panel
+  app.get("/api/admin/system-data", requireRole(["admin", "moderator", "auditor"]), (req: any, res: any) => {
+    try {
+      const users = (serverDb as any).getAdminUsers();
+      const reports = (serverDb as any).getAdminReports();
+      const streams = (serverDb as any).getAdminStreams();
+      const marketplaces = (serverDb as any).getAdminMarketplaces();
+      const products = (serverDb as any).getAdminProducts();
+      const posts = (serverDb as any).getAdminPosts();
+      const sessions = (serverDb as any).getAdminActiveSessions();
+      const ipBlocks = (serverDb as any).getAdminIpBlocks();
+      const auditLogs = serverDb.getAuditLogs();
+      const coupons = (serverDb as any).getCoupons();
+      const allInvoices = (serverDb as any).getAllInvoices();
+      const webhookLogs = (serverDb as any).getWebhookLogs();
+      const conciliationRecords = (serverDb as any).getConciliationRecords();
+
+      // Gather simple metrics
+      const totalDeposits = allInvoices.filter((i: any) => i.status === "completed" && i.type === "deposit").reduce((acc: number, i: any) => acc + i.amount, 0);
+      const totalWithdrawals = allInvoices.filter((i: any) => i.status === "completed" && i.type === "withdraw").reduce((acc: number, i: any) => acc + i.amount, 0);
+      
+      return res.json({
+        users,
+        reports,
+        streams,
+        marketplaces,
+        products,
+        posts,
+        sessions,
+        ipBlocks,
+        auditLogs,
+        coupons,
+        allInvoices,
+        webhookLogs,
+        conciliationRecords,
+        globalConfigs: globalAdminConfigs,
+        metrics: {
+          totalDeposits,
+          totalWithdrawals,
+          activeUsersCount: users.length,
+          activeSessionsCount: sessions.filter((s: any) => s.ativa === 1).length,
+          totalReportsCount: reports.length,
+          pendingReportsCount: reports.filter((r: any) => r.status === "pending").length,
+          ipBlocksCount: ipBlocks.length,
+          ggrAmount: totalDeposits - totalWithdrawals,
+          complianceScore: auditLogs.filter((l: any) => l.isTampered).length > 0 ? 82 : 100
+        }
+      });
+    } catch (err: any) {
+      console.error("[ADMIN DATA RETRIEVAL ERROR]", err);
+      return res.status(500).json({ error: "Erro ao compilar dados do painel administrativo." });
+    }
+  });
+
+  // POST /api/admin/users/update-stats - Change user's balance, coins, level
+  app.post("/api/admin/users/update-stats", requireRole(["admin"]), (req: any, res: any) => {
+    const { targetUserId, balance, coins, level } = req.body;
+    if (!targetUserId) return res.status(400).json({ error: "ID de usuário obrigatório." });
+
+    try {
+      (serverDb as any).updateUserStatsAndBalance(targetUserId, Number(balance), Number(coins), Number(level));
+      serverDb.addAuditLog(req.userId || "admin", "USER_STATS_OVERRIDE", `Saldos do usuário ${targetUserId} alterados via painel admin: Saldo R$ ${balance}, Moedas: ${coins}, Nível: ${level}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, message: "Saldos do usuário atualizados com sucesso." });
+    } catch (err: any) {
+      console.error("[ADMIN UPDATE STATS ERROR]", err);
+      return res.status(500).json({ error: "Erro ao salvar saldos modificados." });
+    }
+  });
+
+  // POST /api/admin/users/ban - Block / unblock users or ban IP
+  app.post("/api/admin/users/ban", requireRole(["admin", "moderator"]), (req: any, res: any) => {
+    const { targetUserId, ip, ban, reason } = req.body;
+    if (!ip) return res.status(400).json({ error: "Endereço de IP é obrigatório." });
+
+    try {
+      if (ban) {
+        // Block until year 2030 (long ban)
+        (serverDb as any).addIpBlockAdmin(ip, "2030-12-31T23:59:59.000Z");
+        serverDb.addAuditLog(req.userId || "moderator", "IP_BAN_IMPOSED", `IP ${ip} banido. Motivo: ${reason || "Infração dos termos de uso"}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      } else {
+        (serverDb as any).removeIpBlockAdmin(ip);
+        serverDb.addAuditLog(req.userId || "moderator", "IP_BAN_REVOKED", `IP ${ip} desbanido pelo painel de controle corporativo`, req.ip || "unknown", req.headers["user-agent"] || "");
+      }
+      return res.json({ success: true, message: ban ? "IP bloqueado com sucesso." : "IP desbloqueado com sucesso." });
+    } catch (err: any) {
+      console.error("[ADMIN BAN ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar banimento de IP." });
+    }
+  });
+
+  // POST /api/admin/users/shadowban - Shadowban a user
+  app.post("/api/admin/users/shadowban", requireRole(["admin", "moderator"]), (req: any, res: any) => {
+    const { targetUserId, shadowban } = req.body;
+    if (!targetUserId) return res.status(400).json({ error: "ID de usuário obrigatório." });
+
+    try {
+      const profile = serverDb.getProfile(targetUserId);
+      if (profile) {
+        (serverDb as any).updateUserShadowban(targetUserId, shadowban ? 1 : 0);
+        serverDb.addAuditLog(req.userId || "moderator", "USER_SHADOWBAN", `Usuário ${targetUserId} shadowban marcado como: ${shadowban}`, req.ip || "unknown", req.headers["user-agent"] || "");
+        return res.json({ success: true, shadowbanned: shadowban });
+      }
+      return res.status(404).json({ error: "Jogador não encontrado." });
+    } catch (err: any) {
+      console.error("[ADMIN SHADOWBAN ERROR]", err);
+      return res.status(500).json({ error: "Erro ao atualizar shadowban." });
+    }
+  });
+
+  // POST /api/admin/users/terminate-session - Terminate active session remotely
+  app.post("/api/admin/users/terminate-session", requireRole(["admin"]), (req: any, res: any) => {
+    const { sessionId } = req.body;
+    if (!sessionId) return res.status(400).json({ error: "ID de sessão obrigatório." });
+
+    try {
+      (serverDb as any).terminateSessionAdmin(sessionId);
+      serverDb.addAuditLog(req.userId || "admin", "SESSION_FORCE_TERMINATED", `Sessão ativa ID ${sessionId} revogada e encerrada remotamente por auditoria`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, message: "Sessão encerrada com sucesso." });
+    } catch (err: any) {
+      console.error("[ADMIN TERMINATE SESSION ERROR]", err);
+      return res.status(500).json({ error: "Erro ao encerrar sessão remota." });
+    }
+  });
+
+  // POST /api/admin/payments/approve - Approve / reject withdrawal or deposit manual approvals
+  app.post("/api/admin/payments/approve", requireRole(["admin", "auditor"]), (req: any, res: any) => {
+    const { invoiceId, approve, reason } = req.body;
+    if (!invoiceId) return res.status(400).json({ error: "ID da fatura é obrigatório." });
+
+    try {
+      const status = approve ? "completed" : "rejected";
+      (serverDb as any).updateInvoiceStatus(invoiceId, status);
+      serverDb.addAuditLog(req.userId || "admin", "INVOICE_STATUS_OVERRIDE", `Fatura ${invoiceId} marcada como ${status} pelo painel admin. Parecer: ${reason || "Nenhum"}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, status });
+    } catch (err: any) {
+      console.error("[ADMIN PAYMENTS APPROVE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao atualizar fatura de pagamento." });
+    }
+  });
+
+  // POST /api/admin/payments/coupons - Create promo coupons
+  app.post("/api/admin/payments/coupons", requireRole(["admin"]), (req: any, res: any) => {
+    const { code, type, value, maxUses } = req.body;
+    if (!code || !type || !value) return res.status(400).json({ error: "Parâmetros do cupom inválidos." });
+
+    try {
+      const id = `CUP-${Date.now()}`;
+      (serverDb as any).createCoupon(id, String(code).toUpperCase(), type, Number(value), Number(maxUses || 9999));
+      serverDb.addAuditLog(req.userId || "admin", "COUPON_CREATED", `Novo cupom promocional criado: ${code}, Valor: ${value}, Tipo: ${type}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, message: "Cupom gerado com sucesso!" });
+    } catch (err: any) {
+      console.error("[ADMIN COUPON CREATING ERROR]", err);
+      return res.status(500).json({ error: "Erro ao criar cupom. Código duplicado ou inválido." });
+    }
+  });
+
+  // POST /api/admin/moderation/resolve-report - Warn / Ban / Dismiss reported items
+  app.post("/api/admin/moderation/resolve-report", requireRole(["admin", "moderator"]), (req: any, res: any) => {
+    const { reportId, action } = req.body; // action: 'resolved', 'dismissed', 'deleted'
+    if (!reportId || !action) return res.status(400).json({ error: "reportId e action são obrigatórios." });
+
+    try {
+      (serverDb as any).updateReportStatus(reportId, action);
+      serverDb.addAuditLog(req.userId || "moderator", "REPORT_RESOLVED", `Denúncia ${reportId} marcada como: ${action}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, message: "Denúncia resolvida." });
+    } catch (err: any) {
+      console.error("[ADMIN RESOLVE REPORT ERROR]", err);
+      return res.status(500).json({ error: "Erro ao resolver denúncia." });
+    }
+  });
+
+  // POST /api/admin/moderation/delete-post - Remove inappropriate posts/comments
+  app.post("/api/admin/moderation/delete-post", requireRole(["admin", "moderator"]), (req: any, res: any) => {
+    const { postId } = req.body;
+    if (!postId) return res.status(400).json({ error: "postId é obrigatório." });
+
+    try {
+      (serverDb as any).deletePostAdmin(postId);
+      serverDb.addAuditLog(req.userId || "moderator", "POST_DELETED_BY_ADMIN", `Postagem ${postId} removida por moderador por violar conduta`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, message: "Publicação removida." });
+    } catch (err: any) {
+      console.error("[ADMIN DELETE POST ERROR]", err);
+      return res.status(500).json({ error: "Erro ao deletar publicação." });
+    }
+  });
+
+  // POST /api/admin/streams/control - Moderate live streaming status
+  app.post("/api/admin/streams/control", requireRole(["admin", "moderator"]), (req: any, res: any) => {
+    const { streamId, isLive } = req.body;
+    if (!streamId) return res.status(400).json({ error: "streamId é obrigatório." });
+
+    try {
+      (serverDb as any).updateStreamStatus(streamId, isLive ? 1 : 0, isLive ? 120 : 0);
+      serverDb.addAuditLog(req.userId || "moderator", "STREAM_MODERATION", `Status da transmissão ${streamId} forçado para: ${isLive ? 'ONLINE' : 'OFFLINE'}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, message: "Status da transmissão atualizado." });
+    } catch (err: any) {
+      console.error("[ADMIN STREAMS CONTROL ERROR]", err);
+      return res.status(500).json({ error: "Erro ao controlar transmissão." });
+    }
+  });
+
+  // POST /api/admin/marketplace/control - Moderate store and products
+  app.post("/api/admin/marketplace/control", requireRole(["admin", "moderator"]), (req: any, res: any) => {
+    const { type, id, isActive, isAvailable } = req.body; // type: 'marketplace' or 'product'
+    if (!type || !id) return res.status(400).json({ error: "Parâmetros id e type são obrigatórios." });
+
+    try {
+      if (type === "marketplace") {
+        (serverDb as any).updateMarketplaceStatus(id, isActive ? 1 : 0);
+        serverDb.addAuditLog(req.userId || "moderator", "MARKETPLACE_MODERATION", `Status da loja ${id} alterado para: ${isActive ? 'ATIVO' : 'SUSPENSO'}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      } else {
+        (serverDb as any).updateProductAvailability(id, isAvailable ? 1 : 0);
+        serverDb.addAuditLog(req.userId || "moderator", "PRODUCT_MODERATION", `Disponibilidade do produto ${id} alterada para: ${isAvailable ? 'SIM' : 'NÃO'}`, req.ip || "unknown", req.headers["user-agent"] || "");
+      }
+      return res.json({ success: true, message: "Marketplace atualizado com sucesso." });
+    } catch (err: any) {
+      console.error("[ADMIN MARKETPLACE CONTROL ERROR]", err);
+      return res.status(500).json({ error: "Erro ao controlar e-commerce." });
+    }
+  });
+
+  // POST /api/admin/configs/update - Update platform parameters
+  app.post("/api/admin/configs/update", requireRole(["admin"]), (req: any, res: any) => {
+    const { configs } = req.body;
+    if (!configs) return res.status(400).json({ error: "Dados de configurações ausentes." });
+
+    try {
+      globalAdminConfigs = {
+        ...globalAdminConfigs,
+        ...configs
+      };
+      serverDb.addAuditLog(req.userId || "admin", "CONFIGS_UPDATED", "Parâmetros globais da plataforma atualizados", req.ip || "unknown", req.headers["user-agent"] || "");
+      return res.json({ success: true, configs: globalAdminConfigs });
+    } catch (err: any) {
+      console.error("[ADMIN CONFIGS UPDATE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao atualizar parâmetros globais." });
     }
   });
 

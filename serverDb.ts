@@ -857,6 +857,95 @@ if (postCountRow.count === 0) {
   );
 }
 
+// --- PAYMENTS INFRASTRUCTURE SCHEMAS ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS payment_coupons (
+    id TEXT PRIMARY KEY,
+    code TEXT UNIQUE NOT NULL,
+    type TEXT NOT NULL, -- 'percent' | 'fixed'
+    value REAL NOT NULL,
+    active INTEGER DEFAULT 1,
+    max_uses INTEGER DEFAULT 100,
+    uses INTEGER DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS payment_affiliates (
+    id TEXT PRIMARY KEY,
+    affiliate_id TEXT NOT NULL,
+    referred_user_id TEXT UNIQUE NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS payment_commissions (
+    id TEXT PRIMARY KEY,
+    affiliate_id TEXT NOT NULL,
+    referred_user_id TEXT NOT NULL,
+    transaction_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS payment_invoices (
+    id TEXT PRIMARY KEY,
+    invoice_number TEXT UNIQUE NOT NULL,
+    user_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    status TEXT NOT NULL, -- 'pending' | 'paid' | 'cancelled' | 'refunded'
+    issue_date TEXT NOT NULL,
+    due_date TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'avulsa', -- 'avulsa' | 'recorrente' | 'futura'
+    pdf_content TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS payment_webhooks (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL,
+    response_status INTEGER,
+    timestamp TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS payment_conciliation (
+    id TEXT PRIMARY KEY,
+    transaction_id TEXT UNIQUE NOT NULL,
+    is_reconciled INTEGER DEFAULT 0,
+    reconciled_at TEXT,
+    notes TEXT,
+    system_amount REAL NOT NULL,
+    provider_amount REAL NOT NULL,
+    status TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS notificacoes_preferencias (
+    user_id TEXT PRIMARY KEY,
+    preferences TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS notificacoes_emails_enviados (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    sent_at TEXT NOT NULL,
+    status TEXT NOT NULL
+  );
+`);
+
+// Seed coupons if empty
+const couponCountRow = db.prepare('SELECT COUNT(*) as count FROM payment_coupons').get() as { count: number };
+if (couponCountRow.count === 0) {
+  db.prepare(`INSERT INTO payment_coupons (id, code, type, value, active, max_uses, uses) VALUES ('cp-1', 'DESCONTO10', 'percent', 10.0, 1, 1000, 0)`).run();
+  db.prepare(`INSERT INTO payment_coupons (id, code, type, value, active, max_uses, uses) VALUES ('cp-2', 'VIPCUPOM', 'fixed', 15.0, 1, 500, 0)`).run();
+  db.prepare(`INSERT INTO payment_coupons (id, code, type, value, active, max_uses, uses) VALUES ('cp-3', 'CASHBACK50', 'percent', 50.0, 1, 200, 0)`).run();
+}
+
 // Database Methods backed by SQLite
 export const serverDb = {
   // Get all users
@@ -921,6 +1010,22 @@ export const serverDb = {
       VALUES (?, ?, ?, ?)
       ON CONFLICT(usuario_id) DO UPDATE SET nome=excluded.nome, avatar=COALESCE(excluded.avatar, avatar), username=COALESCE(username, excluded.username)
     `).run(userId, user.name, user.avatarUrl || null, generatedUsername);
+
+    // Sync with normalized_users to avoid FOREIGN KEY constraint failures in notifications or audit logs
+    const nowIso = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO normalized_users (id, email, password_hash, role, created_at, updated_at, deleted_at, audit_created_by, audit_updated_by)
+      VALUES (?, ?, ?, 'user', ?, ?, NULL, 'system', 'system')
+      ON CONFLICT(id) DO UPDATE SET email=excluded.email, updated_at=excluded.updated_at
+    `).run(userId, user.email, user.password || 'social_auth', nowIso, nowIso);
+
+    // Sync with normalized_profiles
+    const profileId = 'p-' + userId.replace(/[^a-zA-Z0-9_\-]/g, '_');
+    db.prepare(`
+      INSERT INTO normalized_profiles (id, user_id, display_name, username, avatar_url, bio, status, created_at, updated_at, deleted_at, audit_created_by, audit_updated_by)
+      VALUES (?, ?, ?, ?, ?, '', 'offline', ?, ?, NULL, 'system', 'system')
+      ON CONFLICT(user_id) DO UPDATE SET display_name=excluded.display_name, avatar_url=excluded.avatar_url, updated_at=excluded.updated_at
+    `).run(profileId, userId, user.name, generatedUsername, user.avatarUrl || null, nowIso, nowIso);
   },
 
   // Get user profile (stats, balance, limits, biography, following, followers, stores, files)
@@ -2299,5 +2404,230 @@ export const serverDb = {
       console.error('[SEED RELATIONAL ERROR]', err);
       return { success: false, seededCount: 0, error: err.message };
     }
+  },
+
+  // --- PAYMENTS INFRASTRUCTURE METHODS ---
+  getCoupons: () => {
+    return db.prepare("SELECT * FROM payment_coupons").all();
+  },
+  getCouponByCode: (code: string) => {
+    return db.prepare("SELECT * FROM payment_coupons WHERE code = ? AND active = 1").get(code);
+  },
+  useCoupon: (code: string) => {
+    db.prepare("UPDATE payment_coupons SET uses = uses + 1 WHERE code = ?").run(code);
+  },
+  createCoupon: (id: string, code: string, type: string, value: number, maxUses: number) => {
+    db.prepare("INSERT INTO payment_coupons (id, code, type, value, active, max_uses, uses) VALUES (?, ?, ?, ?, 1, ?, 0)").run(id, code, type, value, maxUses);
+  },
+  getAffiliateByReferredUser: (referredUserId: string) => {
+    return db.prepare("SELECT * FROM payment_affiliates WHERE referred_user_id = ?").get(referredUserId);
+  },
+  getAffiliateReferrals: (affiliateId: string) => {
+    return db.prepare("SELECT * FROM payment_affiliates WHERE affiliate_id = ?").all();
+  },
+  addAffiliateReferral: (id: string, affiliateId: string, referredUserId: string, status: string, createdAt: string) => {
+    db.prepare("INSERT OR IGNORE INTO payment_affiliates (id, affiliate_id, referred_user_id, status, created_at) VALUES (?, ?, ?, ?, ?)").run(id, affiliateId, referredUserId, status, createdAt);
+  },
+  updateAffiliateReferralStatus: (referredUserId: string, status: string) => {
+    db.prepare("UPDATE payment_affiliates SET status = ? WHERE referred_user_id = ?").run(status, referredUserId);
+  },
+  getAffiliateCommissions: (affiliateId: string) => {
+    return db.prepare("SELECT * FROM payment_commissions WHERE affiliate_id = ?").all();
+  },
+  addCommission: (id: string, affiliateId: string, referredUserId: string, transactionId: string, amount: number, status: string, createdAt: string) => {
+    db.prepare("INSERT INTO payment_commissions (id, affiliate_id, referred_user_id, transaction_id, amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, affiliateId, referredUserId, transactionId, amount, status, createdAt);
+  },
+  getInvoices: (userId: string) => {
+    return db.prepare("SELECT * FROM payment_invoices WHERE user_id = ? ORDER BY created_at DESC").all();
+  },
+  getAllInvoices: () => {
+    return db.prepare("SELECT * FROM payment_invoices ORDER BY created_at DESC").all();
+  },
+  createInvoice: (id: string, invoiceNumber: string, userId: string, amount: number, status: string, issueDate: string, dueDate: string, type: string, pdfContent: string, createdAt: string) => {
+    db.prepare("INSERT INTO payment_invoices (id, invoice_number, user_id, amount, status, issue_date, due_date, type, pdf_content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, invoiceNumber, userId, amount, status, issueDate, dueDate, type, pdfContent, createdAt);
+  },
+  updateInvoiceStatus: (id: string, status: string) => {
+    db.prepare("UPDATE payment_invoices SET status = ? WHERE id = ?").run(status, id);
+  },
+  getWebhookLogs: () => {
+    return db.prepare("SELECT * FROM payment_webhooks ORDER BY timestamp DESC LIMIT 100").all();
+  },
+  addWebhookLog: (id: string, provider: string, eventType: string, payload: string, status: string, responseStatus: number, timestamp: string) => {
+    db.prepare("INSERT INTO payment_webhooks (id, provider, event_type, payload, status, response_status, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, provider, eventType, payload, status, responseStatus, timestamp);
+  },
+  getConciliationRecords: () => {
+    return db.prepare("SELECT * FROM payment_conciliation ORDER BY reconciled_at DESC").all();
+  },
+  createOrUpdateConciliation: (id: string, transactionId: string, isReconciled: number, reconciledAt: string, notes: string, systemAmount: number, providerAmount: number, status: string) => {
+    db.prepare(`
+      INSERT INTO payment_conciliation (id, transaction_id, is_reconciled, reconciled_at, notes, system_amount, provider_amount, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(transaction_id) DO UPDATE SET
+        is_reconciled = excluded.is_reconciled,
+        reconciled_at = excluded.reconciled_at,
+        notes = excluded.notes,
+        system_amount = excluded.system_amount,
+        provider_amount = excluded.provider_amount,
+        status = excluded.status
+    `).run(id, transactionId, isReconciled, reconciledAt, notes, systemAmount, providerAmount, status);
+  },
+
+  // --- CORPORATE ADMIN PANEL EXPANSIONS ---
+  getAdminUsers: () => {
+    return db.prepare(`
+      SELECT u.id, u.email, u.role, p.nome, p.username, p.avatar, p.biografia, p.stats, p.real_balance, p.withdraw_limit
+      FROM usuarios u
+      LEFT JOIN perfis p ON u.id = p.usuario_id
+    `).all();
+  },
+  getAdminReports: () => {
+    return db.prepare(`SELECT * FROM normalized_reports ORDER BY created_at DESC`).all();
+  },
+  updateReportStatus: (id: string, status: string) => {
+    db.prepare(`UPDATE normalized_reports SET status = ?, updated_at = ? WHERE id = ?`).run(status, new Date().toISOString(), id);
+  },
+  getAdminStreams: () => {
+    return db.prepare(`SELECT * FROM normalized_streaming ORDER BY created_at DESC`).all();
+  },
+  updateStreamStatus: (id: string, isLive: number, viewers: number) => {
+    db.prepare(`UPDATE normalized_streaming SET is_live = ?, viewers_count = ?, updated_at = ? WHERE id = ?`).run(isLive, viewers, new Date().toISOString(), id);
+  },
+  getAdminMarketplaces: () => {
+    return db.prepare(`SELECT * FROM normalized_marketplace ORDER BY created_at DESC`).all();
+  },
+  getAdminProducts: () => {
+    return db.prepare(`SELECT * FROM normalized_products ORDER BY created_at DESC`).all();
+  },
+  updateMarketplaceStatus: (id: string, isActive: number) => {
+    db.prepare(`UPDATE normalized_marketplace SET is_active = ?, updated_at = ? WHERE id = ?`).run(isActive, new Date().toISOString(), id);
+  },
+  updateProductAvailability: (id: string, isAvailable: number) => {
+    db.prepare(`UPDATE normalized_products SET is_available = ?, updated_at = ? WHERE id = ?`).run(isAvailable, new Date().toISOString(), id);
+  },
+  getAdminPosts: () => {
+    return db.prepare(`SELECT * FROM posts ORDER BY criado_em DESC`).all();
+  },
+  deletePostAdmin: (id: string) => {
+    db.prepare(`DELETE FROM posts WHERE id = ?`).run(id);
+  },
+  getAdminActiveSessions: () => {
+    return db.prepare(`SELECT * FROM sessoes_ativas ORDER BY ultimo_acesso DESC`).all();
+  },
+  terminateSessionAdmin: (id: string) => {
+    db.prepare(`UPDATE sessoes_ativas SET ativa = 0 WHERE id = ?`).run(id);
+  },
+  getAdminIpBlocks: () => {
+    return db.prepare(`SELECT * FROM bloqueios_ip`).all();
+  },
+  addIpBlockAdmin: (ip: string, blockUntil: string) => {
+    db.prepare(`
+      INSERT INTO bloqueios_ip (ip, tentativas, bloqueado_ate)
+      VALUES (?, 5, ?)
+      ON CONFLICT(ip) DO UPDATE SET tentativas = 5, bloqueado_ate = excluded.bloqueado_ate
+    `).run(ip, blockUntil);
+  },
+  removeIpBlockAdmin: (ip: string) => {
+    db.prepare(`DELETE FROM bloqueios_ip WHERE ip = ?`).run(ip);
+  },
+  updateUserStatsAndBalance: (userId: string, balance: number, coins: number, level: number) => {
+    const profile = db.prepare(`SELECT * FROM perfis WHERE usuario_id = ?`).get(userId) as any;
+    if (profile) {
+      let statsObj = { coins, level, lives: 3, currentStage: 1, highScore: 0, unlockedSkins: ["classic"], unlockedAccessories: ["none"], unlockedAuras: ["none"], avatar: { skin: "classic", accessory: "none", aura: "none" } };
+      if (profile.stats) {
+        try {
+          const parsed = JSON.parse(profile.stats);
+          statsObj = { ...parsed, coins, level };
+        } catch {}
+      }
+      db.prepare(`UPDATE perfis SET real_balance = ?, stats = ? WHERE usuario_id = ?`).run(
+        balance,
+        JSON.stringify(statsObj),
+        userId
+      );
+    }
+  },
+  updateUserShadowban: (userId: string, shadowban: number) => {
+    const profile = db.prepare(`SELECT * FROM perfis WHERE usuario_id = ?`).get(userId) as any;
+    if (profile) {
+      let statsObj: any = { isShadowbanned: shadowban };
+      if (profile.stats) {
+        try {
+          statsObj = JSON.parse(profile.stats);
+          statsObj.isShadowbanned = shadowban;
+        } catch {}
+      }
+      db.prepare(`UPDATE perfis SET stats = ? WHERE usuario_id = ?`).run(JSON.stringify(statsObj), userId);
+    }
+  },
+  getNotifications: (userId: string) => {
+    return db.prepare(`SELECT * FROM normalized_notifications WHERE user_id = ? ORDER BY created_at DESC`).all(userId);
+  },
+  addNotification: (id: string, userId: string, title: string, body: string, type: string, createdAt: string) => {
+    // Ensure user exists in normalized_users to prevent FOREIGN KEY constraint failed
+    const userExists = db.prepare(`SELECT 1 FROM normalized_users WHERE id = ?`).get(userId);
+    if (!userExists) {
+      // Look them up in legacy usuarios/perfis table
+      const legacyUser = db.prepare(`
+        SELECT u.email, p.nome, p.avatar 
+        FROM usuarios u 
+        LEFT JOIN perfis p ON u.id = p.usuario_id 
+        WHERE u.id = ?
+      `).get(userId) as any;
+
+      const email = legacyUser?.email || `${userId.replace(/[^a-zA-Z0-9_\-]/g, '_')}@gamezone.com`;
+      const name = legacyUser?.nome || 'Jogador';
+      const avatar = legacyUser?.avatar || null;
+      const nowIso = new Date().toISOString();
+      const generatedUsername = (name.toLowerCase().replace(/[^a-z0-9_]/g, '') || 'jogador') + '_' + Math.floor(1000 + Math.random() * 9000);
+
+      db.prepare(`
+        INSERT INTO normalized_users (id, email, password_hash, role, created_at, updated_at, deleted_at, audit_created_by, audit_updated_by)
+        VALUES (?, ?, 'social_auth', 'user', ?, ?, NULL, 'system', 'system')
+        ON CONFLICT(id) DO UPDATE SET email=excluded.email, updated_at=excluded.updated_at
+      `).run(userId, email, nowIso, nowIso);
+
+      const profileId = 'p-' + userId.replace(/[^a-zA-Z0-9_\-]/g, '_');
+      db.prepare(`
+        INSERT INTO normalized_profiles (id, user_id, display_name, username, avatar_url, bio, status, created_at, updated_at, deleted_at, audit_created_by, audit_updated_by)
+        VALUES (?, ?, ?, ?, ?, '', 'offline', ?, ?, NULL, 'system', 'system')
+        ON CONFLICT(user_id) DO UPDATE SET display_name=excluded.display_name, avatar_url=excluded.avatar_url, updated_at=excluded.updated_at
+      `).run(profileId, userId, name, generatedUsername, avatar, nowIso, nowIso);
+    }
+
+    db.prepare(`
+      INSERT INTO normalized_notifications (id, user_id, title, body, type, is_read, created_at, updated_at, deleted_at, audit_created_by, audit_updated_by)
+      VALUES (?, ?, ?, ?, ?, 0, ?, ?, NULL, 'system', 'system')
+    `).run(id, userId, title, body, type, createdAt, createdAt);
+  },
+  markNotificationRead: (id: string, isRead: number) => {
+    db.prepare(`UPDATE normalized_notifications SET is_read = ?, updated_at = ? WHERE id = ?`).run(isRead, new Date().toISOString(), id);
+  },
+  markAllNotificationsRead: (userId: string) => {
+    db.prepare(`UPDATE normalized_notifications SET is_read = 1, updated_at = ? WHERE user_id = ? AND is_read = 0`).run(new Date().toISOString(), userId);
+  },
+  archiveNotification: (id: string, archivedAt: string) => {
+    db.prepare(`UPDATE normalized_notifications SET deleted_at = ?, updated_at = ? WHERE id = ?`).run(archivedAt, archivedAt, id);
+  },
+  deleteNotification: (id: string) => {
+    db.prepare(`DELETE FROM normalized_notifications WHERE id = ?`).run(id);
+  },
+  getNotificationPreferences: (userId: string) => {
+    return db.prepare(`SELECT * FROM notificacoes_preferencias WHERE user_id = ?`).get(userId);
+  },
+  saveNotificationPreferences: (userId: string, preferencesJson: string, updatedAt: string) => {
+    db.prepare(`
+      INSERT INTO notificacoes_preferencias (user_id, preferences, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET preferences = excluded.preferences, updated_at = excluded.updated_at
+    `).run(userId, preferencesJson, updatedAt);
+  },
+  getSentEmails: (userId: string) => {
+    return db.prepare(`SELECT * FROM notificacoes_emails_enviados WHERE user_id = ? ORDER BY sent_at DESC`).all(userId);
+  },
+  addSentEmail: (id: string, userId: string, email: string, title: string, body: string, sentAt: string, status: string) => {
+    db.prepare(`
+      INSERT INTO notificacoes_emails_enviados (id, user_id, email, title, body, sent_at, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, userId, email, title, body, sentAt, status);
   }
 };
