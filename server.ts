@@ -8,6 +8,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { serverDb } from "./serverDb";
+import { GoogleGenAI, Type } from "@google/genai";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1399,10 +1400,143 @@ async function startServer() {
 
   // --- FEED API ROUTES ---
 
-  // GET /api/feed - Fetch all posts in chronological (descending) order
+  // Gemini AI client initialization
+  let geminiClient: GoogleGenAI | null = null;
+  function getGeminiClient() {
+    if (!geminiClient && process.env.GEMINI_API_KEY) {
+      geminiClient = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build'
+          }
+        }
+      });
+    }
+    return geminiClient;
+  }
+
+  // AI Moderation & Spam Detection helper
+  async function moderateContent(text: string, mediaUrl?: string): Promise<{ isSpam: boolean, flagged: boolean, reason?: string }> {
+    const fallbackWords = ['spam', 'buy bitcoin', 'casino', 'free money', 'ganhe dinheiro facil', 'venda de drogas', 'ofensa', 'hacker'];
+    const hasSpamWord = fallbackWords.some(w => text.toLowerCase().includes(w));
+    
+    const client = getGeminiClient();
+    if (!client) {
+      console.log("[AI MODERATION] No GEMINI_API_KEY found, using local rules.");
+      if (hasSpamWord) {
+        return { isSpam: true, flagged: true, reason: "Filtro local detectou termos impróprios ou spam suspeito." };
+      }
+      return { isSpam: false, flagged: false };
+    }
+
+    try {
+      const prompt = `Analise a publicação social a seguir quanto a spam, comportamento abusivo, ofensas graves ou conteúdo impróprio.
+Texto da publicação: "${text}"
+Mídia (se aplicável): ${mediaUrl || "Nenhuma"}
+
+Retorne uma estrutura JSON com:
+- isSpam: true/false (indica se é spam excessivo, links suspeitos, publicidade indesejada)
+- flagged: true/false (indica se deve ser moderado/bloqueado)
+- reason: string explicando o veredito de moderação em português`;
+
+      const response = await client.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              isSpam: { type: Type.BOOLEAN },
+              flagged: { type: Type.BOOLEAN },
+              reason: { type: Type.STRING }
+            },
+            required: ["isSpam", "flagged", "reason"]
+          }
+        }
+      });
+
+      if (response.text) {
+        const parsed = JSON.parse(response.text.trim());
+        return {
+          isSpam: !!parsed.isSpam,
+          flagged: !!parsed.flagged,
+          reason: parsed.reason || "AI Moderation Verdict"
+        };
+      }
+    } catch (err) {
+      console.error("[AI MODERATION ERROR]", err);
+    }
+
+    // Fallback if API fails
+    if (hasSpamWord) {
+      return { isSpam: true, flagged: true, reason: "Regra de contingência de termos bloqueados ativada." };
+    }
+    return { isSpam: false, flagged: false };
+  }
+
+  // GET /api/feed - Fetch all posts with filtering, scoping, and relevance sorting
   app.get("/api/feed", async (req, res) => {
     try {
-      const posts = serverDb.getPosts();
+      let posts = serverDb.getPosts();
+      const { scope, scopeId, hashtag, search, filter } = req.query;
+
+      // 1. Filter by scope (groups, communities, events, pages, or general feed)
+      if (scope) {
+        posts = posts.filter(p => p.scoped_type === scope);
+      }
+      if (scopeId) {
+        posts = posts.filter(p => p.scoped_id === scopeId);
+      }
+
+      // 2. Filter by hashtag
+      if (hashtag) {
+        const cleanHashtag = String(hashtag).toLowerCase().trim();
+        posts = posts.filter(p => p.text.toLowerCase().includes(cleanHashtag));
+      }
+
+      // 3. Search query
+      if (search) {
+        const query = String(search).toLowerCase().trim();
+        posts = posts.filter(p => p.text.toLowerCase().includes(query) || p.username.toLowerCase().includes(query));
+      }
+
+      // 4. Hide flagged posts
+      posts = posts.filter(p => !p.is_flagged);
+
+      // 5. Apply Relevance Algorithm or Content Recommendation if requested
+      if (filter === "recommended" || filter === "popular") {
+        const now = Date.now();
+        const scoredPosts = posts.map(p => {
+          let score = 100;
+          const likesCount = p.likes?.length || 0;
+          const commentsCount = p.comments?.length || 0;
+          
+          let reactionsCount = 0;
+          if (p.reactions) {
+            Object.values(p.reactions).forEach(uids => {
+              reactionsCount += uids.length;
+            });
+          }
+
+          score += (likesCount * 5) + (commentsCount * 8) + (reactionsCount * 3);
+
+          // Recency decay
+          try {
+            const diffMs = now - new Date(p.created_at).getTime();
+            const diffHours = diffMs / (1000 * 60 * 60);
+            score -= (diffHours * 1.5); // 1.5 points deducted per hour
+          } catch {}
+
+          return { post: p, score };
+        });
+
+        // Sort by score descending
+        scoredPosts.sort((a, b) => b.score - a.score);
+        posts = scoredPosts.map(sp => sp.post);
+      }
+
       return res.json({ posts, source: "sqlite" });
     } catch (err: any) {
       console.error("[FEED FETCH ERROR]", err);
@@ -1410,9 +1544,9 @@ async function startServer() {
     }
   });
 
-  // POST /api/feed - Create a post with local image upload handling
+  // POST /api/feed - Create a post with local image upload handling and AI moderation / spam detection
   app.post("/api/feed", upload.single("media"), async (req, res) => {
-    const { username, userAvatarUrl, text, mediaBase64, mediaFileName, mediaUrl, mediaType, userId } = req.body;
+    const { username, userAvatarUrl, text, mediaBase64, mediaFileName, mediaUrl, mediaType, userId, scopedType, scopedId } = req.body;
 
     if (!username || !text) {
       return res.status(400).json({ error: "Nome de usuário e texto são obrigatórios." });
@@ -1432,6 +1566,22 @@ async function startServer() {
       }
     }
 
+    // AI Moderation & Spam Detection
+    let isFlagged = 0;
+    let flagReason = "";
+    let aiModVerdict: any = null;
+
+    try {
+      const mod = await moderateContent(text, finalMediaUrl);
+      if (mod.flagged) {
+        isFlagged = 1;
+        flagReason = mod.reason || "Conteúdo sinalizado pelo sistema de segurança.";
+      }
+      aiModVerdict = { isSpam: mod.isSpam, flagged: mod.flagged, reason: mod.reason };
+    } catch (e) {
+      console.error("[AI MODERATION CALL ERROR]", e);
+    }
+
     const newPost = {
       id: `post-${Date.now()}`,
       userId: userId || undefined,
@@ -1443,15 +1593,437 @@ async function startServer() {
       created_at: new Date().toISOString(),
       likes: [],
       evaluations: {},
-      comments: []
+      comments: [],
+      scoped_type: scopedType || "feed",
+      scoped_id: scopedId || undefined,
+      saved_by: [],
+      reactions: {},
+      is_flagged: isFlagged === 1,
+      flag_reason: flagReason || undefined,
+      ai_mod_verdict: aiModVerdict
     };
 
     try {
       serverDb.addPost(newPost);
-      return res.json({ post: newPost, source: "sqlite" });
+      return res.json({ post: newPost, source: "sqlite", moderation: aiModVerdict });
     } catch (err: any) {
       console.error("[FEED POST CREATION ERROR]", err);
       return res.status(500).json({ error: "Erro ao criar nova publicação no SQLite." });
+    }
+  });
+
+  // POST /api/feed/share - Re-share / Retweet a post
+  app.post("/api/feed/share", (req, res) => {
+    const { postId, userId, username, userAvatarUrl, text } = req.body;
+    if (!postId || !userId || !username) {
+      return res.status(400).json({ error: "postId, userId, and username are required" });
+    }
+
+    const posts = serverDb.getPosts();
+    const sourcePost = posts.find(p => p.id === postId);
+    if (!sourcePost) {
+      return res.status(404).json({ error: "Post original não encontrado" });
+    }
+
+    const sharedPost = {
+      id: `post-${Date.now()}`,
+      userId,
+      username,
+      userAvatarUrl: userAvatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(username)}`,
+      text: text || `Compartilhou a publicação de @${sourcePost.username}`,
+      media_url: undefined,
+      media_type: "image" as "image" | "video",
+      created_at: new Date().toISOString(),
+      likes: [],
+      evaluations: {},
+      comments: [],
+      shared_post_id: postId,
+      scoped_type: "feed",
+      saved_by: [],
+      reactions: {},
+      is_flagged: false
+    };
+
+    try {
+      serverDb.addPost(sharedPost);
+      return res.json({ success: true, post: sharedPost });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao compartilhar publicação" });
+    }
+  });
+
+  // POST /api/feed/react - Add reaction emoji to a post
+  app.post("/api/feed/react", (req, res) => {
+    const { postId, userId, reaction } = req.body; // reaction: 'love', 'haha', 'sad', 'wow', etc.
+    if (!postId || !userId || !reaction) {
+      return res.status(400).json({ error: "postId, userId, and reaction are required" });
+    }
+
+    const posts = serverDb.getPosts();
+    const postIndex = posts.findIndex(p => p.id === postId);
+    if (postIndex === -1) {
+      return res.status(404).json({ error: "Post não encontrado" });
+    }
+
+    const post = posts[postIndex];
+    if (!post.reactions) post.reactions = {};
+
+    // Remove user reaction from any other reactions to avoid double-reacting
+    Object.keys(post.reactions).forEach(r => {
+      post.reactions![r] = post.reactions![r].filter(id => id !== userId);
+    });
+
+    if (!post.reactions[reaction]) post.reactions[reaction] = [];
+    post.reactions[reaction].push(userId);
+
+    posts[postIndex] = post;
+    serverDb.savePosts(posts);
+
+    return res.json({ success: true, reactions: post.reactions });
+  });
+
+  // POST /api/feed/save - Toggle bookmark/save a post
+  app.post("/api/feed/save", (req, res) => {
+    const { postId, userId } = req.body;
+    if (!postId || !userId) {
+      return res.status(400).json({ error: "postId and userId are required" });
+    }
+
+    const posts = serverDb.getPosts();
+    const postIndex = posts.findIndex(p => p.id === postId);
+    if (postIndex === -1) {
+      return res.status(404).json({ error: "Post não encontrado" });
+    }
+
+    const post = posts[postIndex];
+    if (!post.saved_by) post.saved_by = [];
+
+    const savedIndex = post.saved_by.indexOf(userId);
+    let saved = false;
+    if (savedIndex > -1) {
+      post.saved_by.splice(savedIndex, 1);
+    } else {
+      post.saved_by.push(userId);
+      saved = true;
+    }
+
+    posts[postIndex] = post;
+    serverDb.savePosts(posts);
+
+    return res.json({ success: true, saved, saved_by: post.saved_by });
+  });
+
+  // GET /api/feed/saved/:userId - Get saved posts for a user
+  app.get("/api/feed/saved/:userId", (req, res) => {
+    const { userId } = req.params;
+    try {
+      const posts = serverDb.getPosts();
+      const savedPosts = posts.filter(p => p.saved_by && p.saved_by.includes(userId));
+      return res.json({ posts: savedPosts });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao buscar itens salvos" });
+    }
+  });
+
+  // POST /api/feed/report - User reporting a post (with automatic AI review and database reporting)
+  app.post("/api/feed/report", async (req, res) => {
+    const { postId, reporterId, reason } = req.body;
+    if (!postId || !reporterId || !reason) {
+      return res.status(400).json({ error: "postId, reporterId, and reason are required" });
+    }
+
+    const posts = serverDb.getPosts();
+    const postIndex = posts.findIndex(p => p.id === postId);
+    if (postIndex === -1) {
+      return res.status(404).json({ error: "Post não encontrado" });
+    }
+
+    const post = posts[postIndex];
+    const reportId = `rep-${Date.now()}`;
+
+    try {
+      // Add report row in database
+      serverDb.addReport(reportId, reporterId, post.userId || null, "post", postId, reason, "pending", new Date().toISOString());
+
+      // Fast AI audit trigger
+      const mod = await moderateContent(post.text, post.media_url);
+      if (mod.flagged) {
+        post.is_flagged = true;
+        post.flag_reason = `AI Moderation Autoshield: ${mod.reason}`;
+        posts[postIndex] = post;
+        serverDb.savePosts(posts);
+        serverDb.updateReportStatus(reportId, "resolved_flagged");
+      }
+
+      return res.json({ success: true, reportId, aiReviewTriggered: true, postFlagged: !!mod.flagged });
+    } catch (err) {
+      console.error("[REPORT SUBMIT ERROR]", err);
+      return res.status(500).json({ error: "Erro ao registrar denúncia" });
+    }
+  });
+
+  // GET /api/social/trending - Trending topics analysis
+  app.get("/api/social/trending", (req, res) => {
+    try {
+      const posts = serverDb.getPosts();
+      const hashtagCounts: Record<string, number> = {};
+      posts.forEach(p => {
+        if (p.is_flagged) return;
+        const tags = p.text.match(/#[a-zA-Z0-9À-ÿ_]+/g) || [];
+        tags.forEach(tag => {
+          const cleanTag = tag.toLowerCase();
+          hashtagCounts[cleanTag] = (hashtagCounts[cleanTag] || 0) + 1;
+        });
+      });
+      const sortedTrending = Object.entries(hashtagCounts)
+        .map(([tag, count]) => ({ tag, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+      return res.json({ trending: sortedTrending });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao carregar trending topics" });
+    }
+  });
+
+  // --- STORIES ---
+  // GET /api/social/stories - Get active stories (expires_at > now)
+  app.get("/api/social/stories", (req, res) => {
+    try {
+      const stories = serverDb.getStories();
+      return res.json({ stories });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao carregar stories" });
+    }
+  });
+
+  // POST /api/social/stories - Create story
+  app.post("/api/social/stories", upload.single("media"), async (req, res) => {
+    const { username, userAvatarUrl, text, mediaBase64, mediaFileName, mediaUrl, mediaType, userId, bgColor } = req.body;
+    if (!username || (!text && !req.file && !mediaBase64 && !mediaUrl)) {
+      return res.status(400).json({ error: "Nome de usuário e alguma mídia/texto são obrigatórios." });
+    }
+
+    let finalMediaUrl = mediaUrl || "";
+    if (req.file) {
+      finalMediaUrl = `/uploads/${req.file.filename}`;
+    } else if (mediaBase64 && !finalMediaUrl) {
+      const savedLocalUrl = saveBase64ToUploads(mediaBase64, mediaFileName || "story.png");
+      if (savedLocalUrl) finalMediaUrl = savedLocalUrl;
+    }
+
+    // AI check for story
+    let isFlagged = 0;
+    let flagReason = "";
+    let aiModVerdict: any = null;
+    if (text) {
+      try {
+        const mod = await moderateContent(text, finalMediaUrl);
+        if (mod.flagged) {
+          isFlagged = 1;
+          flagReason = mod.reason || "Story violou as diretrizes de comunidade.";
+        }
+        aiModVerdict = mod;
+      } catch {}
+    }
+
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 Hours
+
+    const story = {
+      id: `story-${Date.now()}`,
+      usuario_id: userId || undefined,
+      username,
+      user_avatar_url: userAvatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(username)}`,
+      media_url: finalMediaUrl || undefined,
+      media_type: (mediaType as 'image' | 'video') || 'image',
+      bg_color: bgColor || undefined,
+      text: text || undefined,
+      created_at: new Date().toISOString(),
+      expires_at: expiresAt,
+      is_flagged: isFlagged === 1,
+      flag_reason: flagReason || undefined,
+      ai_mod_verdict: aiModVerdict
+    };
+
+    try {
+      serverDb.addStory(story);
+      return res.json({ success: true, story });
+    } catch (err) {
+      console.error("[STORY CREATE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao criar story" });
+    }
+  });
+
+  // --- GROUPS / COMMUNITIES ---
+  app.get("/api/social/groups", (req, res) => {
+    try {
+      const groups = serverDb.getSocialGroups();
+      return res.json({ groups });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao carregar grupos" });
+    }
+  });
+
+  app.post("/api/social/groups", (req, res) => {
+    const { name, description, creatorId, avatarUrl, bannerUrl, type } = req.body;
+    if (!name || !creatorId) {
+      return res.status(400).json({ error: "name and creatorId are required" });
+    }
+
+    const group = {
+      id: `group-${Date.now()}`,
+      name,
+      description,
+      creator_id: creatorId,
+      avatar_url: avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`,
+      banner_url: bannerUrl,
+      type: type || "group",
+      created_at: new Date().toISOString()
+    };
+
+    try {
+      serverDb.addSocialGroup(group);
+      return res.json({ success: true, group });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao criar grupo/comunidade" });
+    }
+  });
+
+  app.post("/api/social/groups/:id/join", (req, res) => {
+    const { id } = req.params;
+    const { userId, type } = req.body; // type: 'group' or 'community'
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const success = serverDb.joinGroup(userId, id, type || 'group', new Date().toISOString());
+    if (success) {
+      return res.json({ success: true });
+    }
+    return res.status(400).json({ error: "Erro ao entrar no grupo" });
+  });
+
+  app.post("/api/social/groups/:id/leave", (req, res) => {
+    const { id } = req.params;
+    const { userId, type } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const success = serverDb.leaveGroup(userId, id, type || 'group');
+    if (success) {
+      return res.json({ success: true });
+    }
+    return res.status(400).json({ error: "Erro ao sair do grupo" });
+  });
+
+  app.get("/api/social/groups/:id/members", (req, res) => {
+    const { id } = req.params;
+    try {
+      const members = serverDb.getGroupMembers(id);
+      return res.json({ members });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao carregar membros" });
+    }
+  });
+
+  // --- EVENTS ---
+  app.get("/api/social/events", (req, res) => {
+    try {
+      const events = serverDb.getSocialEvents();
+      return res.json({ events });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao carregar eventos" });
+    }
+  });
+
+  app.post("/api/social/events", (req, res) => {
+    const { title, description, creatorId, date, location, avatarUrl, bannerUrl } = req.body;
+    if (!title || !creatorId || !date) {
+      return res.status(400).json({ error: "title, creatorId, and date are required" });
+    }
+
+    const event = {
+      id: `evt-${Date.now()}`,
+      title,
+      description,
+      creator_id: creatorId,
+      date,
+      location,
+      avatar_url: avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(title)}`,
+      banner_url: bannerUrl,
+      created_at: new Date().toISOString()
+    };
+
+    try {
+      serverDb.addSocialEvent(event);
+      return res.json({ success: true, event });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao criar evento" });
+    }
+  });
+
+  app.post("/api/social/events/:id/rsvp", (req, res) => {
+    const { id } = req.params;
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const success = serverDb.joinGroup(userId, id, 'event', new Date().toISOString());
+    if (success) {
+      return res.json({ success: true });
+    }
+    return res.status(400).json({ error: "Erro ao responder convite do evento" });
+  });
+
+  // --- PAGES ---
+  app.get("/api/social/pages", (req, res) => {
+    try {
+      const pages = serverDb.getSocialPages();
+      return res.json({ pages });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao carregar páginas" });
+    }
+  });
+
+  app.post("/api/social/pages", (req, res) => {
+    const { name, description, creatorId, avatarUrl, bannerUrl, category } = req.body;
+    if (!name || !creatorId) {
+      return res.status(400).json({ error: "name and creatorId are required" });
+    }
+
+    const page = {
+      id: `page-${Date.now()}`,
+      name,
+      description,
+      creator_id: creatorId,
+      avatar_url: avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`,
+      banner_url: bannerUrl,
+      category,
+      created_at: new Date().toISOString()
+    };
+
+    try {
+      serverDb.addSocialPage(page);
+      return res.json({ success: true, page });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao criar página" });
+    }
+  });
+
+  app.post("/api/social/pages/:id/follow", (req, res) => {
+    const { id } = req.params;
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const success = serverDb.joinGroup(userId, id, 'page', new Date().toISOString());
+    if (success) {
+      return res.json({ success: true });
+    }
+    return res.status(400).json({ error: "Erro ao seguir página" });
+  });
+
+  app.get("/api/social/memberships/:userId", (req, res) => {
+    const { userId } = req.params;
+    try {
+      const memberships = serverDb.getMemberships(userId);
+      return res.json({ memberships });
+    } catch (err) {
+      return res.status(500).json({ error: "Erro ao carregar inscrições" });
     }
   });
 

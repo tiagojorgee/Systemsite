@@ -1,5 +1,5 @@
 {
-  "name": "GameZon",
+  "name": "GameZone",
   "description": "Plataforma comercial e ecossistema de entretenimento gamer integrado com e-commerce de afiliados, arena social, chat em tempo real, cinema comunitário e jogos interativos de alta performance.",
   "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

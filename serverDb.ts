@@ -122,6 +122,57 @@ export interface FeedComment {
   replies?: FeedReply[];
 }
 
+export interface Story {
+  id: string;
+  usuario_id?: string;
+  username: string;
+  user_avatar_url?: string;
+  media_url?: string;
+  media_type?: 'image' | 'video';
+  bg_color?: string;
+  text?: string;
+  created_at: string;
+  expires_at: string;
+  is_flagged?: boolean;
+  flag_reason?: string;
+  ai_mod_verdict?: any;
+}
+
+export interface SocialGroup {
+  id: string;
+  name: string;
+  description?: string;
+  creator_id: string;
+  avatar_url?: string;
+  banner_url?: string;
+  type?: 'group' | 'community';
+  member_count?: number;
+  created_at: string;
+}
+
+export interface SocialEvent {
+  id: string;
+  title: string;
+  description?: string;
+  creator_id: string;
+  date: string;
+  location?: string;
+  avatar_url?: string;
+  banner_url?: string;
+  created_at: string;
+}
+
+export interface SocialPage {
+  id: string;
+  name: string;
+  description?: string;
+  creator_id: string;
+  avatar_url?: string;
+  banner_url?: string;
+  category?: string;
+  created_at: string;
+}
+
 export interface FeedPost {
   id: string;
   userId?: string;
@@ -139,6 +190,14 @@ export interface FeedPost {
   adActionUrl?: string;
   adCategory?: 'movie' | 'game' | 'shop';
   hiddenFor?: string[]; // Array of user_ids who hid this post
+  shared_post_id?: string;
+  scoped_type?: string; // 'feed' | 'group' | 'community' | 'event' | 'page'
+  scoped_id?: string;
+  saved_by?: string[]; // array of userIds
+  reactions?: Record<string, string[]>; // key: emoji reaction name, value: array of userIds
+  is_flagged?: boolean;
+  flag_reason?: string;
+  ai_mod_verdict?: any;
 }
 
 const DB_FILE_PATH = path.join(process.cwd(), 'database.sqlite');
@@ -936,7 +995,87 @@ db.exec(`
     sent_at TEXT NOT NULL,
     status TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS stories (
+    id TEXT PRIMARY KEY,
+    usuario_id TEXT,
+    username TEXT,
+    user_avatar_url TEXT,
+    media_url TEXT,
+    media_type TEXT DEFAULT 'image',
+    bg_color TEXT,
+    text TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    is_flagged INTEGER DEFAULT 0,
+    flag_reason TEXT,
+    ai_mod_verdict TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS social_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    creator_id TEXT NOT NULL,
+    avatar_url TEXT,
+    banner_url TEXT,
+    type TEXT DEFAULT 'group', -- 'group' or 'community'
+    member_count INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS social_events (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    creator_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    location TEXT,
+    avatar_url TEXT,
+    banner_url TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS social_pages (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    creator_id TEXT NOT NULL,
+    avatar_url TEXT,
+    banner_url TEXT,
+    category TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS social_memberships (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    target_type TEXT NOT NULL, -- 'group' | 'community' | 'event' | 'page'
+    role TEXT DEFAULT 'member',
+    created_at TEXT NOT NULL,
+    UNIQUE(user_id, target_id, target_type)
+  );
 `);
+
+// Table migrations for posts in SQLite
+const alterQueries = [
+  "ALTER TABLE posts ADD COLUMN shared_post_id TEXT;",
+  "ALTER TABLE posts ADD COLUMN scoped_type TEXT DEFAULT 'feed';",
+  "ALTER TABLE posts ADD COLUMN scoped_id TEXT;",
+  "ALTER TABLE posts ADD COLUMN saved_by TEXT DEFAULT '[]';",
+  "ALTER TABLE posts ADD COLUMN reactions TEXT DEFAULT '{}';",
+  "ALTER TABLE posts ADD COLUMN is_flagged INTEGER DEFAULT 0;",
+  "ALTER TABLE posts ADD COLUMN flag_reason TEXT;",
+  "ALTER TABLE posts ADD COLUMN ai_mod_verdict TEXT;"
+];
+for (const q of alterQueries) {
+  try {
+    db.prepare(q).run();
+  } catch (e) {
+    // Column might already exist, safe to ignore
+  }
+}
 
 // Seed coupons if empty
 const couponCountRow = db.prepare('SELECT COUNT(*) as count FROM payment_coupons').get() as { count: number };
@@ -1534,11 +1673,17 @@ export const serverDb = {
       let evalsObj: Record<string, number> = {};
       let commentsArr: FeedComment[] = [];
       let hiddenArr: string[] = [];
+      let savedByArr: string[] = [];
+      let reactionsObj: Record<string, string[]> = {};
+      let aiModVerdictObj: any = null;
 
       try { if (row.curtidas) likesArr = JSON.parse(row.curtidas); } catch (e) {}
       try { if (row.evaluations) evalsObj = JSON.parse(row.evaluations); } catch (e) {}
       try { if (row.comments) commentsArr = JSON.parse(row.comments); } catch (e) {}
       try { if (row.oculto_para) hiddenArr = JSON.parse(row.oculto_para); } catch (e) {}
+      try { if (row.saved_by) savedByArr = JSON.parse(row.saved_by); } catch (e) {}
+      try { if (row.reactions) reactionsObj = JSON.parse(row.reactions); } catch (e) {}
+      try { if (row.ai_mod_verdict) aiModVerdictObj = JSON.parse(row.ai_mod_verdict); } catch (e) {}
 
       return {
         id: row.id,
@@ -1556,7 +1701,15 @@ export const serverDb = {
         adTitle: row.ad_title || undefined,
         adActionUrl: row.ad_action_url || undefined,
         adCategory: (row.ad_category as 'movie' | 'game' | 'shop') || undefined,
-        hiddenFor: hiddenArr
+        hiddenFor: hiddenArr,
+        shared_post_id: row.shared_post_id || undefined,
+        scoped_type: row.scoped_type || 'feed',
+        scoped_id: row.scoped_id || undefined,
+        saved_by: savedByArr,
+        reactions: reactionsObj,
+        is_flagged: row.is_flagged === 1,
+        flag_reason: row.flag_reason || undefined,
+        ai_mod_verdict: aiModVerdictObj
       };
     });
   },
@@ -1564,8 +1717,12 @@ export const serverDb = {
   // Create feed post
   addPost: (post: FeedPost): void => {
     db.prepare(`
-      INSERT INTO posts (id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, evaluations, comments, is_ad, ad_title, ad_action_url, ad_category, oculto_para)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO posts (
+        id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, 
+        evaluations, comments, is_ad, ad_title, ad_action_url, ad_category, oculto_para,
+        shared_post_id, scoped_type, scoped_id, saved_by, reactions, is_flagged, flag_reason, ai_mod_verdict
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       post.id,
       post.text,
@@ -1582,7 +1739,15 @@ export const serverDb = {
       post.adTitle || null,
       post.adActionUrl || null,
       post.adCategory || null,
-      JSON.stringify(post.hiddenFor || [])
+      JSON.stringify(post.hiddenFor || []),
+      post.shared_post_id || null,
+      post.scoped_type || 'feed',
+      post.scoped_id || null,
+      JSON.stringify(post.saved_by || []),
+      JSON.stringify(post.reactions || {}),
+      post.is_flagged ? 1 : 0,
+      post.flag_reason || null,
+      post.ai_mod_verdict ? JSON.stringify(post.ai_mod_verdict) : null
     );
   },
 
@@ -1617,8 +1782,12 @@ export const serverDb = {
     const insertOrReplace = db.transaction((postsList: FeedPost[]) => {
       for (const p of postsList) {
         db.prepare(`
-          INSERT INTO posts (id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, evaluations, comments, is_ad, ad_title, ad_action_url, ad_category, oculto_para)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO posts (
+            id, texto, url_midia, usuario_id, curtidas, media_type, username, user_avatar_url, created_at, 
+            evaluations, comments, is_ad, ad_title, ad_action_url, ad_category, oculto_para,
+            shared_post_id, scoped_type, scoped_id, saved_by, reactions, is_flagged, flag_reason, ai_mod_verdict
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             texto=excluded.texto,
             url_midia=excluded.url_midia,
@@ -1634,7 +1803,15 @@ export const serverDb = {
             ad_title=excluded.ad_title,
             ad_action_url=excluded.ad_action_url,
             ad_category=excluded.ad_category,
-            oculto_para=excluded.oculto_para
+            oculto_para=excluded.oculto_para,
+            shared_post_id=excluded.shared_post_id,
+            scoped_type=excluded.scoped_type,
+            scoped_id=excluded.scoped_id,
+            saved_by=excluded.saved_by,
+            reactions=excluded.reactions,
+            is_flagged=excluded.is_flagged,
+            flag_reason=excluded.flag_reason,
+            ai_mod_verdict=excluded.ai_mod_verdict
         `).run(
           p.id,
           p.text,
@@ -1651,7 +1828,15 @@ export const serverDb = {
           p.adTitle || null,
           p.adActionUrl || null,
           p.adCategory || null,
-          JSON.stringify(p.hiddenFor || [])
+          JSON.stringify(p.hiddenFor || []),
+          p.shared_post_id || null,
+          p.scoped_type || 'feed',
+          p.scoped_id || null,
+          JSON.stringify(p.saved_by || []),
+          JSON.stringify(p.reactions || {}),
+          p.is_flagged ? 1 : 0,
+          p.flag_reason || null,
+          p.ai_mod_verdict ? JSON.stringify(p.ai_mod_verdict) : null
         );
       }
     });
@@ -2629,5 +2814,155 @@ export const serverDb = {
       INSERT INTO notificacoes_emails_enviados (id, user_id, email, title, body, sent_at, status)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(id, userId, email, title, body, sentAt, status);
+  },
+
+  // --- ADVANCED SOCIAL NETWORK MODULES ---
+  // Stories
+  getStories: (): Story[] => {
+    return db.prepare("SELECT * FROM stories WHERE datetime(expires_at) > datetime('now') ORDER BY created_at DESC").all() as any[];
+  },
+  addStory: (story: Story) => {
+    db.prepare(`
+      INSERT INTO stories (id, usuario_id, username, user_avatar_url, media_url, media_type, bg_color, text, created_at, expires_at, is_flagged, flag_reason, ai_mod_verdict)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      story.id,
+      story.usuario_id || null,
+      story.username,
+      story.user_avatar_url || null,
+      story.media_url || null,
+      story.media_type || 'image',
+      story.bg_color || null,
+      story.text || null,
+      story.created_at,
+      story.expires_at,
+      story.is_flagged ? 1 : 0,
+      story.flag_reason || null,
+      story.ai_mod_verdict ? JSON.stringify(story.ai_mod_verdict) : null
+    );
+  },
+  deleteStory: (storyId: string, userId: string) => {
+    const result = db.prepare("DELETE FROM stories WHERE id = ? AND usuario_id = ?").run(storyId, userId);
+    return result.changes > 0;
+  },
+
+  // Groups and Communities
+  getSocialGroups: (): SocialGroup[] => {
+    return db.prepare("SELECT * FROM social_groups ORDER BY created_at DESC").all() as any[];
+  },
+  addSocialGroup: (group: SocialGroup) => {
+    db.prepare(`
+      INSERT INTO social_groups (id, name, description, creator_id, avatar_url, banner_url, type, member_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(
+      group.id,
+      group.name,
+      group.description || null,
+      group.creator_id,
+      group.avatar_url || null,
+      group.banner_url || null,
+      group.type || 'group',
+      group.created_at
+    );
+    // Auto-join the creator as admin
+    db.prepare(`
+      INSERT OR IGNORE INTO social_memberships (id, user_id, target_id, target_type, role, created_at)
+      VALUES (?, ?, ?, ?, 'admin', ?)
+    `).run(`mem-${group.id}-${group.creator_id}`, group.creator_id, group.id, group.type || 'group', group.created_at);
+  },
+  joinGroup: (userId: string, targetId: string, targetType: string, createdAt: string) => {
+    try {
+      db.prepare(`
+        INSERT INTO social_memberships (id, user_id, target_id, target_type, role, created_at)
+        VALUES (?, ?, ?, ?, 'member', ?)
+      `).run(`mem-${targetId}-${userId}`, userId, targetId, targetType, createdAt);
+      // Update count
+      if (targetType === 'group' || targetType === 'community') {
+        db.prepare("UPDATE social_groups SET member_count = member_count + 1 WHERE id = ?").run(targetId);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  leaveGroup: (userId: string, targetId: string, targetType: string) => {
+    const result = db.prepare("DELETE FROM social_memberships WHERE user_id = ? AND target_id = ? AND target_type = ?").run(userId, targetId, targetType);
+    if (result.changes > 0) {
+      if (targetType === 'group' || targetType === 'community') {
+        db.prepare("UPDATE social_groups SET member_count = MAX(0, member_count - 1) WHERE id = ?").run(targetId);
+      }
+      return true;
+    }
+    return false;
+  },
+  getMemberships: (userId: string) => {
+    return db.prepare("SELECT * FROM social_memberships WHERE user_id = ?").all();
+  },
+  getGroupMembers: (groupId: string) => {
+    return db.prepare(`
+      SELECT m.user_id, m.role, p.nome, p.username, p.avatar 
+      FROM social_memberships m
+      LEFT JOIN perfis p ON m.user_id = p.usuario_id
+      WHERE m.target_id = ?
+    `).all(groupId);
+  },
+
+  // Events
+  getSocialEvents: (): SocialEvent[] => {
+    return db.prepare("SELECT * FROM social_events ORDER BY date ASC").all() as any[];
+  },
+  addSocialEvent: (event: SocialEvent) => {
+    db.prepare(`
+      INSERT INTO social_events (id, title, description, creator_id, date, location, avatar_url, banner_url, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      event.id,
+      event.title,
+      event.description || null,
+      event.creator_id,
+      event.date,
+      event.location || null,
+      event.avatar_url || null,
+      event.banner_url || null,
+      event.created_at
+    );
+    // Auto RSVP
+    db.prepare(`
+      INSERT OR IGNORE INTO social_memberships (id, user_id, target_id, target_type, role, created_at)
+      VALUES (?, ?, ?, 'event', 'admin', ?)
+    `).run(`mem-${event.id}-${event.creator_id}`, event.creator_id, event.id, event.created_at);
+  },
+
+  // Pages
+  getSocialPages: (): SocialPage[] => {
+    return db.prepare("SELECT * FROM social_pages ORDER BY name ASC").all() as any[];
+  },
+  addSocialPage: (page: SocialPage) => {
+    db.prepare(`
+      INSERT INTO social_pages (id, name, description, creator_id, avatar_url, banner_url, category, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      page.id,
+      page.name,
+      page.description || null,
+      page.creator_id,
+      page.avatar_url || null,
+      page.banner_url || null,
+      page.category || null,
+      page.created_at
+    );
+    // Auto Follow/Like
+    db.prepare(`
+      INSERT OR IGNORE INTO social_memberships (id, user_id, target_id, target_type, role, created_at)
+      VALUES (?, ?, ?, 'page', 'admin', ?)
+    `).run(`mem-${page.id}-${page.creator_id}`, page.creator_id, page.id, page.created_at);
+  },
+
+  // Reports creation (User-facing report system)
+  addReport: (id: string, reporterId: string, reportedUserId: string | null, contentType: string, contentId: string, reason: string, status: string, createdAt: string) => {
+    db.prepare(`
+      INSERT INTO normalized_reports (id, reporter_id, reported_user_id, content_type, content_id, reason, status, created_at, updated_at, audit_created_by, audit_updated_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, reporterId, reportedUserId, contentType, contentId, reason, status, createdAt, createdAt, reporterId, reporterId);
   }
 };
