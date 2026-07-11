@@ -102,6 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       title: 'Entretenimento',
       items: [
         { id: 'games', label: 'Arcade Gamer', icon: Swords },
+        { id: 'distribution', label: 'Distribuição & Loja PC', icon: ShoppingBag, badge: 'R56' },
         { id: 'cinema', label: 'Sessão Cinema', icon: Video },
         { id: 'gamehub', label: 'GameHub & LiveHub', icon: Network },
         { id: 'creatorhub', label: 'Creator Hub', icon: Tv }

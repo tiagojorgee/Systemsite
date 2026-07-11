@@ -33,6 +33,7 @@ const FinancePortal = lazy(() => import('./components/FinancePortal').then(m => 
 const GameHubLiveHub = lazy(() => import('./components/GameHubLiveHub').then(m => ({ default: m.GameHubLiveHub })));
 const CreatorHub = lazy(() => import('./components/CreatorHub').then(m => ({ default: m.CreatorHub })));
 const EventsPortal = lazy(() => import('./components/EventsPortal').then(m => ({ default: m.EventsPortal })));
+const DistributionPortal = lazy(() => import('./components/DistributionPortal').then(m => ({ default: m.DistributionPortal })));
 
 interface TabLoaderProps {
   tabName: string;
@@ -80,8 +81,8 @@ const TabLoader = ({ tabName }: TabLoaderProps) => {
 };
 
 export default function App() {
-  // Tabs: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin' | 'gamehub' | 'creatorhub' | 'events' | 'home'
-  const [activeTab, setActiveTab] = useState<'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin' | 'gamehub' | 'creatorhub' | 'events' | 'home'>('home');
+  // Tabs: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin' | 'gamehub' | 'creatorhub' | 'events' | 'home' | 'distribution'
+  const [activeTab, setActiveTab] = useState<'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin' | 'gamehub' | 'creatorhub' | 'events' | 'home' | 'distribution'>('home');
 
   // Theme support
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -979,6 +980,18 @@ export default function App() {
                 setActiveTab={setActiveTab}
                 realBalance={realBalance}
                 setRealBalance={setRealBalance}
+              />
+            </div>
+          )}
+
+          {activeTab === 'distribution' && (
+            <div className="p-3 md:p-6 max-w-7xl mx-auto">
+              <DistributionPortal
+                realBalance={realBalance}
+                setRealBalance={setRealBalance}
+                onTriggerToast={(msg) => triggerToast(msg)}
+                onAddLog={(type, desc, amount, currency) => addLog(type, desc, amount, currency)}
+                isAdmin={loggedInUser ? loggedInUser.email?.includes('admin') || true : true}
               />
             </div>
           )}
