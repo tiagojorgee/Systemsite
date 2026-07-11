@@ -3,6 +3,10 @@ let audioCtx: AudioContext | null = null;
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   
+  // Sound is disabled by default to respect: "Nunca reproduzir sons automaticamente sem configuração do usuário."
+  const soundEnabled = localStorage.getItem('gamezone_sound_enabled') === 'true';
+  if (!soundEnabled) return null;
+  
   if (!audioCtx) {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (AudioContextClass) {
@@ -15,6 +19,21 @@ function getAudioContext(): AudioContext | null {
   }
   
   return audioCtx;
+}
+
+function getVolumeFactor(): number {
+  if (typeof window === 'undefined') return 0.5;
+  const volStr = localStorage.getItem('gamezone_sound_volume');
+  if (volStr === null) return 0.5;
+  const vol = parseInt(volStr, 10);
+  return isNaN(vol) ? 0.5 : vol / 100;
+}
+
+function connectToDestination(ctx: AudioContext, node: AudioNode) {
+  const masterGain = ctx.createGain();
+  masterGain.gain.setValueAtTime(getVolumeFactor(), ctx.currentTime);
+  node.connect(masterGain);
+  masterGain.connect(ctx.destination);
 }
 
 export const playSound = {
@@ -33,7 +52,7 @@ export const playSound = {
     gain.gain.exponentialRampToValueAtTime(0.005, ctx.currentTime + 0.08);
 
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    connectToDestination(ctx, gain);
 
     osc.start();
     osc.stop(ctx.currentTime + 0.08);
@@ -54,7 +73,7 @@ export const playSound = {
     gain.gain.exponentialRampToValueAtTime(0.005, ctx.currentTime + 0.12);
 
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    connectToDestination(ctx, gain);
 
     osc.start();
     osc.stop(ctx.currentTime + 0.12);
@@ -76,7 +95,7 @@ export const playSound = {
       gain.gain.exponentialRampToValueAtTime(0.005, ctx.currentTime + startOffset + duration);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      connectToDestination(ctx, gain);
 
       osc.start(ctx.currentTime + startOffset);
       osc.stop(ctx.currentTime + startOffset + duration);
@@ -103,7 +122,7 @@ export const playSound = {
       gain.gain.exponentialRampToValueAtTime(0.005, ctx.currentTime + index * 0.07 + 0.2);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      connectToDestination(ctx, gain);
 
       osc.start(ctx.currentTime + index * 0.07);
       osc.stop(ctx.currentTime + index * 0.07 + 0.2);
@@ -130,7 +149,7 @@ export const playSound = {
 
     osc.connect(filter);
     filter.connect(gain);
-    gain.connect(ctx.destination);
+    connectToDestination(ctx, gain);
 
     osc.start();
     osc.stop(ctx.currentTime + 0.55);
@@ -157,7 +176,7 @@ export const playSound = {
 
     osc1.connect(gain);
     osc2.connect(gain);
-    gain.connect(ctx.destination);
+    connectToDestination(ctx, gain);
 
     osc1.start();
     osc2.start();
@@ -185,7 +204,7 @@ export const playSound = {
 
     osc.connect(filter);
     filter.connect(gain);
-    gain.connect(ctx.destination);
+    connectToDestination(ctx, gain);
 
     osc.start();
     osc.stop(ctx.currentTime + 0.15);
@@ -206,7 +225,7 @@ export const playSound = {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.03);
 
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    connectToDestination(ctx, gain);
 
     osc.start();
     osc.stop(ctx.currentTime + 0.03);
@@ -228,7 +247,7 @@ export const playSound = {
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      connectToDestination(ctx, gain);
 
       osc.start(ctx.currentTime + start);
       osc.stop(ctx.currentTime + start + duration);

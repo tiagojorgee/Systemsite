@@ -14,6 +14,7 @@ import { getCleanUserId, getUserProfile, saveUserProfile, getUserLogs, addUserLo
 import { secureStorage } from './utils/security';
 import { AdminPortal } from './components/AdminPortal';
 import { NotificationCenter } from './components/NotificationCenter';
+import { InteractiveBackground } from './components/InteractiveBackground';
 
 // Dynamic Lazy Loaded Sub-Views for optimal on-demand rendering
 const GamePortal = lazy(() => import('./components/GamePortal').then(m => ({ default: m.GamePortal })));
@@ -110,6 +111,30 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [theme]);
+
+  // Set global accessibility & performance class selectors on HTML on startup
+  useEffect(() => {
+    const perfMode = localStorage.getItem('gamezone_perf_mode') || 'ultra';
+    const reduceMotion = localStorage.getItem('gamezone_reduce_motion') === 'true';
+    const noEffects = localStorage.getItem('gamezone_no_effects') === 'true';
+    const highContrast = localStorage.getItem('gamezone_high_contrast') === 'true';
+    const simplifiedUi = localStorage.getItem('gamezone_simplified_ui') === 'true';
+
+    document.documentElement.classList.remove('perf-economy', 'perf-balanced', 'perf-ultra');
+    document.documentElement.classList.add(`perf-${perfMode}`);
+
+    if (reduceMotion) document.documentElement.classList.add('reduce-motion');
+    else document.documentElement.classList.remove('reduce-motion');
+
+    if (highContrast) document.documentElement.classList.add('high-contrast');
+    else document.documentElement.classList.remove('high-contrast');
+
+    if (noEffects) document.documentElement.classList.add('no-bg-effects');
+    else document.documentElement.classList.remove('no-bg-effects');
+
+    if (simplifiedUi) document.documentElement.classList.add('simplified-ui');
+    else document.documentElement.classList.remove('simplified-ui');
+  }, []);
 
   // User Authentication States
   const [loggedInUser, setLoggedInUser] = useState<AppUser | null>(() => {
@@ -759,7 +784,10 @@ export default function App() {
       />
 
       {/* Main Container Area */}
-      <div className="flex-1 flex flex-col min-h-screen min-w-0">
+      <div className="flex-1 flex flex-col min-h-screen min-w-0 relative">
+        
+        {/* Interactive Animated Gamer Background Canvas */}
+        <InteractiveBackground activeTab={activeTab} />
         
         {/* Decorative Fluid Ambient Glowing Backdrops */}
         <div className="absolute top-[-15%] left-[-15%] w-[60%] h-[50%] rounded-full bg-indigo-500/10 blur-[130px] pointer-events-none animate-float" />

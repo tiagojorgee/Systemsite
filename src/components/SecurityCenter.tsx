@@ -517,12 +517,103 @@ interface SecurityCenterProps {
 }
 
 export function SecurityCenter({ user, onUserUpdate, onLogout }: SecurityCenterProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | '2fa' | 'audit' | 'lgpd' | 'dr' | 'schema' | 'sessions' | 'history'>('schema');
+  const [activeTab, setActiveTab] = useState<'overview' | '2fa' | 'audit' | 'lgpd' | 'dr' | 'schema' | 'sessions' | 'history' | 'perf_a11y'>('perf_a11y');
   const [diagnostics, setDiagnostics] = useState<SecurityDiagnostics | null>(null);
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Performance and Accessibility settings states
+  const [perfMode, setPerfMode] = useState<string>(() => localStorage.getItem('gamezone_perf_mode') || 'ultra');
+  const [reduceMotion, setReduceMotion] = useState<boolean>(() => localStorage.getItem('gamezone_reduce_motion') === 'true');
+  const [noEffects, setNoEffects] = useState<boolean>(() => localStorage.getItem('gamezone_no_effects') === 'true');
+  const [highContrast, setHighContrast] = useState<boolean>(() => localStorage.getItem('gamezone_high_contrast') === 'true');
+  const [simplifiedUi, setSimplifiedUi] = useState<boolean>(() => localStorage.getItem('gamezone_simplified_ui') === 'true');
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => localStorage.getItem('gamezone_sound_enabled') === 'true');
+  const [soundVolume, setSoundVolume] = useState<number>(() => {
+    const v = localStorage.getItem('gamezone_sound_volume');
+    return v ? parseInt(v, 10) : 50;
+  });
+
+  const [hardwareInfo, setHardwareInfo] = useState<{
+    cores: number;
+    memory: string;
+    userAgent: string;
+    networkSpeedSimulated: string;
+    isMobile: boolean;
+  } | null>(null);
+
+  const applyAndSaveSettings = (key: string, value: any) => {
+    localStorage.setItem(key, String(value));
+    
+    // Dispatch custom event to let background canvas know instantly
+    window.dispatchEvent(new CustomEvent('gamezone_perf_settings_changed'));
+
+    // Apply document-level utility classes
+    if (key === 'gamezone_reduce_motion') {
+      if (value) {
+        document.documentElement.classList.add('reduce-motion');
+      } else {
+        document.documentElement.classList.remove('reduce-motion');
+      }
+    } else if (key === 'gamezone_high_contrast') {
+      if (value) {
+        document.documentElement.classList.add('high-contrast');
+      } else {
+        document.documentElement.classList.remove('high-contrast');
+      }
+    } else if (key === 'gamezone_simplified_ui') {
+      if (value) {
+        document.documentElement.classList.add('simplified-ui');
+      } else {
+        document.documentElement.classList.remove('simplified-ui');
+      }
+    } else if (key === 'gamezone_no_effects') {
+      if (value) {
+        document.documentElement.classList.add('no-bg-effects');
+      } else {
+        document.documentElement.classList.remove('no-bg-effects');
+      }
+    } else if (key === 'gamezone_perf_mode') {
+      document.documentElement.classList.remove('perf-economy', 'perf-balanced', 'perf-ultra');
+      document.documentElement.classList.add(`perf-${value}`);
+    }
+  };
+
+  const runHardwareDiagnostics = () => {
+    playSound.collect();
+    const cores = navigator.hardwareConcurrency || 4;
+    const memory = (navigator as any).deviceMemory ? `${(navigator as any).deviceMemory} GB` : 'Não detectado';
+    const ua = navigator.userAgent;
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    
+    // Simulated diagnostic checks
+    let recMode = 'ultra';
+    if (cores <= 2 || isMobile) {
+      recMode = 'economy';
+    } else if (cores <= 4) {
+      recMode = 'balanced';
+    }
+
+    setHardwareInfo({
+      cores,
+      memory,
+      userAgent: isMobile ? 'Dispositivo Móvel' : 'Computador / Desktop',
+      networkSpeedSimulated: 'Excelente (Fibra Gamer)',
+      isMobile,
+    });
+
+    setPerfMode(recMode);
+    setNoEffects(recMode === 'economy');
+    setReduceMotion(recMode === 'economy');
+
+    applyAndSaveSettings('gamezone_perf_mode', recMode);
+    applyAndSaveSettings('gamezone_no_effects', recMode === 'economy');
+    applyAndSaveSettings('gamezone_reduce_motion', recMode === 'economy');
+
+    setSuccessMsg(`Otimização automática concluída! Detectamos ${cores} núcleos de processamento. Recomendamos o modo: ${recMode.toUpperCase()}.`);
+  };
 
   // Identity Core Expanded States
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
@@ -1113,6 +1204,7 @@ export function SecurityCenter({ user, onUserUpdate, onLogout }: SecurityCenterP
       {/* Main Tabs */}
       <div className="flex flex-wrap gap-2 mb-8 border-b border-slate-800 pb-4">
         {[
+          { id: 'perf_a11y', label: 'Desempenho & Acessibilidade', icon: Flame },
           { id: 'schema', label: 'Estúdio de Banco Relacional (22 Tabelas)', icon: Network },
           { id: 'overview', label: 'Diagnóstico & KPI', icon: Activity },
           { id: 'sessions', label: 'Sessões Ativas', icon: Users },
@@ -1139,6 +1231,257 @@ export function SecurityCenter({ user, onUserUpdate, onLogout }: SecurityCenterP
           );
         })}
       </div>
+
+      {/* Tab Content: Performance & Accessibility Preferências */}
+      {activeTab === 'perf_a11y' && (
+        <div className="space-y-6 animate-fadeIn">
+          <div className="bg-slate-950/40 border border-slate-800 rounded-2xl p-6">
+            <h3 className="text-lg font-bold flex items-center gap-2 mb-2 text-slate-200">
+              <Flame className="w-5 h-5 text-indigo-400" /> Preferências de Desempenho & Acessibilidade
+            </h3>
+            <p className="text-slate-400 text-sm mb-6">
+              Ajuste as configurações visuais, de áudio e de renderização da plataforma para garantir máxima fluidez, acessibilidade e adequação ao hardware de seu dispositivo.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              
+              {/* SEÇÃO 1: MODO DE DESEMPENHO E RENDERIZAÇÃO */}
+              <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-5 space-y-6">
+                <div>
+                  <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2 mb-1">
+                    🚀 Modo de Desempenho Gráfico
+                  </h4>
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    Escolha a intensidade de renderização dos efeitos interativos em tempo real.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 p-1 bg-slate-900 border border-slate-800 rounded-xl">
+                  {[
+                    { id: 'economy', label: 'Economia', desc: 'Desativa canvas e glows. Recomendado para celulares ou notebooks antigos.' },
+                    { id: 'balanced', label: 'Equilibrado', desc: 'Resolução padrão com metade do volume de partículas e sombras sutis.' },
+                    { id: 'ultra', label: 'Ultra', desc: 'Efeitos de física completos, partículas responsivas e iluminação de néon premium.' }
+                  ].map((mode) => (
+                    <button
+                      key={mode.id}
+                      onClick={() => {
+                        setPerfMode(mode.id);
+                        applyAndSaveSettings('gamezone_perf_mode', mode.id);
+                        if (mode.id === 'economy') {
+                          setNoEffects(true);
+                          setReduceMotion(true);
+                          applyAndSaveSettings('gamezone_no_effects', true);
+                          applyAndSaveSettings('gamezone_reduce_motion', true);
+                        } else {
+                          setNoEffects(false);
+                          setReduceMotion(false);
+                          applyAndSaveSettings('gamezone_no_effects', false);
+                          applyAndSaveSettings('gamezone_reduce_motion', false);
+                        }
+                        playSound.click();
+                      }}
+                      className={`px-3 py-3 rounded-lg font-bold text-xs flex flex-col items-center justify-center gap-1.5 transition-all ${
+                        perfMode === mode.id
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                      }`}
+                    >
+                      <span className="capitalize">{mode.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Display active mode description */}
+                <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 text-xs text-slate-400">
+                  <span className="font-semibold text-slate-300 block mb-1">Modo Selecionado: {perfMode.toUpperCase()}</span>
+                  {perfMode === 'economy' && 'Reduz o consumo de CPU/GPU a praticamente zero. Ideal para prolongar a vida útil de bateria.'}
+                  {perfMode === 'balanced' && 'Equilíbrio ideal entre estética elegante e alta performance, sem perdas de taxa de quadros (FPS).'}
+                  {perfMode === 'ultra' && 'Aproveite o máximo do poder computacional do seu navegador com canvas altamente fluidos e glows reativos.'}
+                </div>
+
+                {/* Otimização automática por hardware */}
+                <div className="pt-2 border-t border-slate-800/50">
+                  <button
+                    onClick={runHardwareDiagnostics}
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white text-xs font-bold px-4 py-3 rounded-xl transition"
+                  >
+                    🔍 Detecção Automática e Otimização de Hardware
+                  </button>
+                  {hardwareInfo && (
+                    <div className="mt-3 bg-slate-900 p-3 rounded-xl border border-slate-800/80 text-[11px] font-mono text-indigo-300 space-y-1">
+                      <div>• Núcleos de CPU detectados: <span className="text-white font-bold">{hardwareInfo.cores}</span></div>
+                      <div>• Dispositivo estimado: <span className="text-white font-bold">{hardwareInfo.userAgent}</span></div>
+                      <div>• Recomendação aplicada: <span className="text-emerald-400 font-bold">{perfMode.toUpperCase()}</span></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* SEÇÃO 2: OPÇÕES DE ACESSIBILIDADE */}
+              <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-5 space-y-6">
+                <div>
+                  <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2 mb-1">
+                    ♿ Opções de Acessibilidade
+                  </h4>
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    Personalize a legibilidade, velocidade e contraste do ecossistema.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Reduzir Movimento */}
+                  <label className="flex items-start gap-3 cursor-pointer text-sm text-slate-300 hover:text-white transition">
+                    <input
+                      type="checkbox"
+                      checked={reduceMotion}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        setReduceMotion(val);
+                        applyAndSaveSettings('gamezone_reduce_motion', val);
+                        playSound.click();
+                      }}
+                      className="rounded bg-slate-900 border-slate-800 text-indigo-600 focus:ring-0 focus:ring-offset-0 w-4.5 h-4.5 mt-0.5"
+                    />
+                    <div>
+                      <span className="font-medium block">Reduzir Movimento (Reduce Motion)</span>
+                      <span className="text-[11px] text-slate-500 block">Substitui animações, slides, blur e transições de tela por transições instantâneas simplificadas.</span>
+                    </div>
+                  </label>
+
+                  {/* Alto Contraste */}
+                  <label className="flex items-start gap-3 cursor-pointer text-sm text-slate-300 hover:text-white transition">
+                    <input
+                      type="checkbox"
+                      checked={highContrast}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        setHighContrast(val);
+                        applyAndSaveSettings('gamezone_high_contrast', val);
+                        playSound.click();
+                      }}
+                      className="rounded bg-slate-900 border-slate-800 text-indigo-600 focus:ring-0 focus:ring-offset-0 w-4.5 h-4.5 mt-0.5"
+                    />
+                    <div>
+                      <span className="font-medium block">Modo Alto Contraste (Contrast Booster)</span>
+                      <span className="text-[11px] text-slate-500 block">Maximiza o contraste de cores das fontes e adiciona bordas sólidas nítidas nos painéis, atendendo diretrizes de leitura AAAA.</span>
+                    </div>
+                  </label>
+
+                  {/* Sem Efeitos de Fundo */}
+                  <label className="flex items-start gap-3 cursor-pointer text-sm text-slate-300 hover:text-white transition">
+                    <input
+                      type="checkbox"
+                      checked={noEffects}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        setNoEffects(val);
+                        applyAndSaveSettings('gamezone_no_effects', val);
+                        playSound.click();
+                      }}
+                      className="rounded bg-slate-900 border-slate-800 text-indigo-600 focus:ring-0 focus:ring-offset-0 w-4.5 h-4.5 mt-0.5"
+                    />
+                    <div>
+                      <span className="font-medium block">Remover Efeitos Animados de Fundo</span>
+                      <span className="text-[11px] text-slate-500 block">Desliga completamente o canvas interativo de partículas e fluxos de energia, operando com uma cor sólida de alto desempenho.</span>
+                    </div>
+                  </label>
+
+                  {/* Modo Simplificado */}
+                  <label className="flex items-start gap-3 cursor-pointer text-sm text-slate-300 hover:text-white transition">
+                    <input
+                      type="checkbox"
+                      checked={simplifiedUi}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        setSimplifiedUi(val);
+                        applyAndSaveSettings('gamezone_simplified_ui', val);
+                        playSound.click();
+                      }}
+                      className="rounded bg-slate-900 border-slate-800 text-indigo-600 focus:ring-0 focus:ring-offset-0 w-4.5 h-4.5 mt-0.5"
+                    />
+                    <div>
+                      <span className="font-medium block">Interface Mínima Simplificada</span>
+                      <span className="text-[11px] text-slate-500 block">Oculta painéis extras informativos, faixas animadas e ornamentos puramente decorativos para uma navegação focada e direta.</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+            </div>
+
+            {/* SEÇÃO 3: CONTROLE DE EFEITOS SONOROS (Audio UX) */}
+            <div className="mt-8 bg-slate-950/70 border border-slate-800/80 rounded-2xl p-6">
+              <h4 className="font-bold text-slate-200 text-sm flex items-center gap-2 mb-2">
+                🎵 Configurações de Áudio (Audio UX)
+              </h4>
+              <p className="text-slate-400 text-xs mb-6">
+                Efeitos sonoros integrados gerados dinamicamente via síntese de frequências por Web Audio API. 
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                <div className="space-y-4">
+                  {/* Master audio switch */}
+                  <div className="flex items-center justify-between p-4 bg-slate-900 rounded-xl border border-slate-800">
+                    <div>
+                      <span className="font-medium text-slate-200 text-sm block">Efeitos de Som Retro</span>
+                      <span className="text-[10px] text-slate-500">Habilitar feedback sonoro em cliques, moedas, conquistas e alertas.</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const next = !soundEnabled;
+                        setSoundEnabled(next);
+                        // Save string representation
+                        localStorage.setItem('gamezone_sound_enabled', String(next));
+                        
+                        // Wait a tiny bit then play sound if enabled to show instant feedback!
+                        setTimeout(() => {
+                          if (next) {
+                            playSound.click();
+                          }
+                        }, 50);
+                      }}
+                      className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-all duration-300 ${
+                        soundEnabled ? 'bg-indigo-600 justify-end' : 'bg-slate-800 justify-start'
+                      }`}
+                    >
+                      <span className="w-4 h-4 rounded-full bg-white block shadow-md" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Slider de Volume */}
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs text-slate-400 font-mono">
+                    <span>Volume Geral:</span>
+                    <span>{soundVolume}%</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-slate-500 text-xs">🔈</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={soundVolume}
+                      disabled={!soundEnabled}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        setSoundVolume(v);
+                        localStorage.setItem('gamezone_sound_volume', String(v));
+                      }}
+                      className="flex-1 accent-indigo-500 h-1 bg-slate-800 rounded-lg cursor-pointer"
+                    />
+                    <span className="text-slate-500 text-xs">🔊</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    O volume regula a amplitude de sintetizadores retro em tempo real (ondas senoidais e dente de serra).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* Tab Content 0: Schema Modeling & SQL Sandbox */}
       {activeTab === 'schema' && (

@@ -109,3 +109,69 @@ html, body {
   box-shadow: 0 0 20px rgba(16, 185, 129, 0.15);
 }
 
+/* Accessibility & Performance Mode Selectors */
+
+/* 1. REDUCE MOTION (Force zero animation duration and instant scroll) */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-delay: -1ms !important;
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  transition-delay: 0s !important;
+  transition-duration: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+/* 2. HIGH CONTRAST (Increase reading legibility and add solid panel borders) */
+.high-contrast {
+  --slate-950: #000000;
+  --slate-900: #0a0a0c;
+  --slate-800: #1c1917;
+}
+
+.high-contrast * {
+  text-shadow: none !important;
+  box-shadow: none !important;
+}
+
+.high-contrast div[class*="border-"],
+.high-contrast div[class*="border"],
+.high-contrast button,
+.high-contrast select,
+.high-contrast input {
+  border: 2px solid #ffffff !important;
+}
+
+.high-contrast p,
+.high-contrast span:not([class*="text-slate-"]),
+.high-contrast h1,
+.high-contrast h2,
+.high-contrast h3,
+.high-contrast h4 {
+  color: #ffffff !important;
+}
+
+.high-contrast .text-slate-400,
+.high-contrast .text-slate-500 {
+  color: #f8fafc !important;
+}
+
+/* 3. SIMPLIFIED UI OVERRIDES (Disable pulsing and glows) */
+.simplified-ui .bg-scanlines,
+.simplified-ui .glow-purple,
+.simplified-ui .glow-emerald,
+.simplified-ui .animate-float {
+  background-image: none !important;
+  animation: none !important;
+  box-shadow: none !important;
+}
+
+/* 4. NO BACKGROUND EFFECTS OVERRIDES (Hide ambient layout backdrops) */
+.no-bg-effects div[class*="bg-indigo-500/10"],
+.no-bg-effects div[class*="bg-purple-500/10"],
+.no-bg-effects div[class*="bg-blue-500/5"] {
+  display: none !important;
+}
+
+
