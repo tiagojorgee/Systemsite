@@ -3140,5 +3140,360 @@ export const serverDb = {
       INSERT INTO normalized_reports (id, reporter_id, reported_user_id, content_type, content_id, reason, status, created_at, updated_at, audit_created_by, audit_updated_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, reporterId, reportedUserId, contentType, contentId, reason, status, createdAt, createdAt, reporterId, reporterId);
+  },
+
+  // --- ENTERPRISE MARKETPLACE & PRODUCTS METHODS ---
+  getEnterpriseStore: (idOrUrl: string) => {
+    return db.prepare("SELECT * FROM normalized_marketplace WHERE id = ? OR custom_url = ?").get(idOrUrl, idOrUrl);
+  },
+
+  getEnterpriseStoreBySeller: (sellerId: string) => {
+    return db.prepare("SELECT * FROM normalized_marketplace WHERE seller_id = ?").get(sellerId);
+  },
+
+  getAllEnterpriseStores: () => {
+    return db.prepare("SELECT * FROM normalized_marketplace WHERE is_active = 1").all();
+  },
+
+  createEnterpriseStore: (store: { id: string; seller_id: string; store_name: string; custom_url: string; logo_url: string; banner_url: string; theme: string; description: string; categories: string }) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO normalized_marketplace (id, seller_id, store_name, custom_url, logo_url, banner_url, theme, description, categories, is_active, created_at, updated_at, audit_created_by, audit_updated_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+    `).run(
+      store.id,
+      store.seller_id,
+      store.store_name,
+      store.custom_url,
+      store.logo_url,
+      store.banner_url,
+      store.theme || 'default',
+      store.description || '',
+      store.categories || '[]',
+      now,
+      now,
+      store.seller_id,
+      store.seller_id
+    );
+  },
+
+  updateEnterpriseStore: (storeId: string, store: { store_name: string; custom_url: string; logo_url: string; banner_url: string; theme: string; description: string; categories: string }) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE normalized_marketplace SET
+        store_name = ?,
+        custom_url = ?,
+        logo_url = ?,
+        banner_url = ?,
+        theme = ?,
+        description = ?,
+        categories = ?,
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      store.store_name,
+      store.custom_url,
+      store.logo_url,
+      store.banner_url,
+      store.theme,
+      store.description,
+      store.categories,
+      now,
+      storeId
+    );
+  },
+
+  getStoreProducts: (storeId: string) => {
+    return db.prepare("SELECT * FROM normalized_products WHERE marketplace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC").all(storeId);
+  },
+
+  getAllEnterpriseProducts: () => {
+    return db.prepare(`
+      SELECT p.*, m.store_name, m.custom_url, m.seller_id
+      FROM normalized_products p
+      JOIN normalized_marketplace m ON p.marketplace_id = m.id
+      WHERE p.is_available = 1 AND p.deleted_at IS NULL
+      ORDER BY p.created_at DESC
+    `).all();
+  },
+
+  getEnterpriseProduct: (productId: string) => {
+    return db.prepare(`
+      SELECT p.*, m.store_name, m.custom_url, m.seller_id
+      FROM normalized_products p
+      JOIN normalized_marketplace m ON p.marketplace_id = m.id
+      WHERE p.id = ? AND p.deleted_at IS NULL
+    `).get(productId);
+  },
+
+  createEnterpriseProduct: (prod: {
+    id: string;
+    marketplace_id: string;
+    title: string;
+    price: number;
+    description: string;
+    category: string;
+    type: string;
+    stock: number;
+    variations: string;
+    sku: string;
+    images: string;
+    video_url: string;
+    digital_file_url: string;
+    subscription_plan: string;
+  }) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO normalized_products (
+        id, marketplace_id, title, price, description, category, is_available,
+        type, stock, variations, sku, images, video_url, digital_file_url, subscription_plan,
+        created_at, updated_at, audit_created_by, audit_updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'seller', 'seller')
+    `).run(
+      prod.id,
+      prod.marketplace_id,
+      prod.title,
+      prod.price,
+      prod.description || '',
+      prod.category || 'general',
+      prod.type || 'physical',
+      prod.stock || 0,
+      prod.variations || '[]',
+      prod.sku || '',
+      prod.images || '[]',
+      prod.video_url || '',
+      prod.digital_file_url || '',
+      prod.subscription_plan || '{}',
+      now,
+      now
+    );
+  },
+
+  updateEnterpriseProduct: (productId: string, prod: {
+    title: string;
+    price: number;
+    description: string;
+    category: string;
+    type: string;
+    stock: number;
+    variations: string;
+    sku: string;
+    images: string;
+    video_url: string;
+    digital_file_url: string;
+    subscription_plan: string;
+    is_available: number;
+  }) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE normalized_products SET
+        title = ?,
+        price = ?,
+        description = ?,
+        category = ?,
+        type = ?,
+        stock = ?,
+        variations = ?,
+        sku = ?,
+        images = ?,
+        video_url = ?,
+        digital_file_url = ?,
+        subscription_plan = ?,
+        is_available = ?,
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      prod.title,
+      prod.price,
+      prod.description,
+      prod.category,
+      prod.type,
+      prod.stock,
+      prod.variations,
+      prod.sku,
+      prod.images,
+      prod.video_url,
+      prod.digital_file_url,
+      prod.subscription_plan,
+      prod.is_available,
+      now,
+      productId
+    );
+  },
+
+  deleteEnterpriseProduct: (productId: string) => {
+    const now = new Date().toISOString();
+    db.prepare("UPDATE normalized_products SET deleted_at = ?, is_available = 0 WHERE id = ?").run(now, productId);
+  },
+
+  getEnterpriseOrders: (userId: string, isSeller: boolean) => {
+    if (isSeller) {
+      return db.prepare(`
+        SELECT o.*, p.title as product_title, p.images as product_images, b.email as buyer_email, m.store_name
+        FROM normalized_orders o
+        JOIN normalized_products p ON o.product_id = p.id
+        JOIN normalized_marketplace m ON p.marketplace_id = m.id
+        JOIN normalized_users b ON o.buyer_id = b.id
+        WHERE m.seller_id = ?
+        ORDER BY o.created_at DESC
+      `).all(userId);
+    } else {
+      return db.prepare(`
+        SELECT o.*, p.title as product_title, p.images as product_images, m.store_name, m.seller_id
+        FROM normalized_orders o
+        JOIN normalized_products p ON o.product_id = p.id
+        JOIN normalized_marketplace m ON p.marketplace_id = m.id
+        WHERE o.buyer_id = ?
+        ORDER BY o.created_at DESC
+      `).all(userId);
+    }
+  },
+
+  createEnterpriseOrder: (order: {
+    id: string;
+    buyer_id: string;
+    product_id: string;
+    total_price: number;
+    commission_amount: number;
+    status: string;
+    quantity: number;
+    shipping_address: string;
+    shipping_tracking_code?: string;
+    variation_selected?: string;
+  }) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO normalized_orders (
+        id, buyer_id, product_id, total_price, commission_amount, status,
+        quantity, shipping_address, shipping_tracking_code, variation_selected,
+        created_at, updated_at, audit_created_by, audit_updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      order.id,
+      order.buyer_id,
+      order.product_id,
+      order.total_price,
+      order.commission_amount,
+      order.status || 'pending',
+      order.quantity || 1,
+      order.shipping_address || '',
+      order.shipping_tracking_code || '',
+      order.variation_selected || '',
+      now,
+      now,
+      order.buyer_id,
+      order.buyer_id
+    );
+
+    // Update product stock if available and if physical/digital
+    try {
+      db.prepare(`
+        UPDATE normalized_products
+        SET stock = MAX(0, stock - ?)
+        WHERE id = ?
+      `).run(order.quantity || 1, order.product_id);
+    } catch (err) {
+      console.error("[DECREMENT STOCK ERROR]", err);
+    }
+  },
+
+  updateEnterpriseOrderStatus: (orderId: string, status: string, trackingCode?: string) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE normalized_orders SET
+        status = ?,
+        shipping_tracking_code = COALESCE(?, shipping_tracking_code),
+        updated_at = ?
+      WHERE id = ?
+    `).run(status, trackingCode || null, now, orderId);
+  },
+
+  // --- REVIEWS METHODS ---
+  getProductReviews: (productId: string) => {
+    return db.prepare(`
+      SELECT r.*, p.display_name, p.avatar_url, u.email
+      FROM normalized_reviews r
+      JOIN normalized_profiles p ON r.user_id = p.user_id
+      JOIN normalized_users u ON r.user_id = u.id
+      WHERE r.product_id = ?
+      ORDER BY r.created_at DESC
+    `).all(productId);
+  },
+
+  createProductReview: (review: { id: string; user_id: string; product_id: string; rating: number; comment: string }) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO normalized_reviews (id, user_id, product_id, rating, comment, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(review.id, review.user_id, review.product_id, review.rating, review.comment, now);
+
+    // Recalculate marketplace average reputation
+    try {
+      const prod = db.prepare("SELECT marketplace_id FROM normalized_products WHERE id = ?").get(review.product_id) as any;
+      if (prod && prod.marketplace_id) {
+        const avgRep = db.prepare(`
+          SELECT AVG(r.rating) as avg_rating
+          FROM normalized_reviews r
+          JOIN normalized_products p ON r.product_id = p.id
+          WHERE p.marketplace_id = ?
+        `).get(prod.marketplace_id) as any;
+        if (avgRep && avgRep.avg_rating) {
+          db.prepare("UPDATE normalized_marketplace SET reputation = ? WHERE id = ?").run(Number(avgRep.avg_rating).toFixed(2), prod.marketplace_id);
+        }
+      }
+    } catch (err) {
+      console.error("[REPUTATION CALC ERROR]", err);
+    }
+  },
+
+  // --- QUESTIONS METHODS ---
+  getProductQuestions: (productId: string) => {
+    return db.prepare(`
+      SELECT q.*, p.display_name, p.avatar_url
+      FROM normalized_questions q
+      JOIN normalized_profiles p ON q.user_id = p.user_id
+      WHERE q.product_id = ?
+      ORDER BY q.created_at DESC
+    `).all(productId);
+  },
+
+  createProductQuestion: (quest: { id: string; user_id: string; product_id: string; question: string }) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO normalized_questions (id, user_id, product_id, question, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(quest.id, quest.user_id, quest.product_id, quest.question, now);
+  },
+
+  answerProductQuestion: (questionId: string, answer: string) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE normalized_questions
+      SET answer = ?, answered_at = ?
+      WHERE id = ?
+    `).run(answer, now, questionId);
+  },
+
+  // --- WISHLIST METHODS ---
+  getWishlist: (userId: string) => {
+    return db.prepare(`
+      SELECT w.id as wishlist_entry_id, p.*, m.store_name, m.custom_url
+      FROM normalized_wishlist w
+      JOIN normalized_products p ON w.product_id = p.id
+      JOIN normalized_marketplace m ON p.marketplace_id = m.id
+      WHERE w.user_id = ? AND p.deleted_at IS NULL
+    `).all(userId);
+  },
+
+  addToWishlist: (id: string, userId: string, productId: string) => {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT OR IGNORE INTO normalized_wishlist (id, user_id, product_id, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(id, userId, productId, now);
+  },
+
+  removeFromWishlist: (userId: string, productId: string) => {
+    db.prepare("DELETE FROM normalized_wishlist WHERE user_id = ? AND product_id = ?").run(userId, productId);
   }
 };

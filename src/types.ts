@@ -32,6 +32,19 @@ export interface PlayerStats {
   rtpBoostSpins?: number;
   points?: number;
   level?: number;
+  
+  // 🏆 Global Event & Progression System Integration
+  battlePassXp?: number;
+  battlePassLevel?: number;
+  battlePassPremiumUnlocked?: boolean;
+  unlockedTitles?: string[];
+  unlockedBadges?: string[];
+  activeTitle?: string;
+  activeBadges?: string[];
+  boxesInventory?: { type: 'common' | 'rare' | 'legendary' | 'sponsored'; count: number }[];
+  completedQuestIds?: string[];
+  dailyCheckedInDays?: number[]; // list of days (e.g. [1, 2, 3]) checked in during the current monthly cycle
+  lastDailyCheckInDate?: string; // ISO date string
 }
 
 export interface TransactionLog {

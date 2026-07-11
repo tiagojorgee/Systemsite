@@ -35,10 +35,12 @@ import {
   Tv,
   Award,
   Bell,
-  ThumbsUp
+  ThumbsUp,
+  Store
 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 import { MarketplaceMap } from './MarketplaceMap';
+import { EnterpriseMarketplace } from './EnterpriseMarketplace';
 
 // Custom Type Definitions for the Ecommerce Store
 interface EcomProduct {
@@ -347,7 +349,7 @@ export const GamezoneShop: React.FC<{
   }, [wishlist]);
 
   // Active filters and query search
-  const [activeShopSubTab, setActiveShopSubTab] = useState<'vitrine' | 'marketplace'>('vitrine');
+  const [activeShopSubTab, setActiveShopSubTab] = useState<'vitrine' | 'marketplace' | 'enterprise'>('enterprise');
   const [selectedCategory, setSelectedCategory] = useState<string>('todos');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterType, setFilterType] = useState<'todos' | 'dropship' | 'affiliate'>('todos');
@@ -763,8 +765,18 @@ export const GamezoneShop: React.FC<{
         </div>
       </div>
 
-      {/* Dynamic Sub-tab Switcher: Vitrine de Lojas vs. Marketplace & Mapa */}
+      {/* Dynamic Sub-tab Switcher: Vitrine de Lojas vs. Marketplace & Mapa vs. Enterprise Marketplace */}
       <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200 w-full mb-8" id="shop-sub-tab-switcher">
+        <button
+          onClick={() => { playSound.click(); setActiveShopSubTab('enterprise'); }}
+          className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            activeShopSubTab === 'enterprise'
+              ? 'bg-slate-900 text-yellow-400 shadow-md font-black'
+              : 'text-slate-600 hover:text-slate-800'
+          }`}
+        >
+          <Store className="w-4 h-4" /> Lojas Virtuais (Enterprise) 🏪
+        </button>
         <button
           onClick={() => { playSound.click(); setActiveShopSubTab('vitrine'); }}
           className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
@@ -773,7 +785,7 @@ export const GamezoneShop: React.FC<{
               : 'text-slate-600 hover:text-slate-800'
           }`}
         >
-          <ShoppingBag className="w-4 h-4" /> Vitrine Gamer (Produtos da Plataforma)
+          <ShoppingBag className="w-4 h-4" /> Vitrine (Dropshipping)
         </button>
         <button
           onClick={() => { playSound.click(); setActiveShopSubTab('marketplace'); }}
@@ -783,11 +795,21 @@ export const GamezoneShop: React.FC<{
               : 'text-slate-600 hover:text-slate-800'
           }`}
         >
-          <Compass className="w-4 h-4" /> Marketplace &amp; Mapa de Lojas Afiliadas 📍
+          <Compass className="w-4 h-4" /> Mapa de Afiliadas 📍
         </button>
       </div>
 
-      {activeShopSubTab === 'vitrine' ? (
+      {activeShopSubTab === 'enterprise' ? (
+        <EnterpriseMarketplace
+          stats={stats}
+          updateStats={updateStats}
+          addLog={addLog}
+          loggedInUser={loggedInUser}
+          onOpenLogin={onOpenLogin}
+          realBalance={realBalance}
+          setRealBalance={setRealBalance}
+        />
+      ) : activeShopSubTab === 'vitrine' ? (
         <>
           {/* Admin Panel to Add Custom Products (paste link) */}
           <AnimatePresence>

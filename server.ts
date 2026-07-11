@@ -3084,6 +3084,561 @@ Retorne uma estrutura JSON com:
     }
   });
 
+  // --- ENTERPRISE MARKETPLACE ENDPOINTS ---
+
+  // GET /api/marketplace/enterprise/stores - Retrieve all active stores
+  app.get("/api/marketplace/enterprise/stores", (req, res) => {
+    try {
+      const stores = serverDb.getAllEnterpriseStores();
+      return res.json({ success: true, stores });
+    } catch (err: any) {
+      console.error("[GET ENTERPRISE STORES ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar lojas." });
+    }
+  });
+
+  // GET /api/marketplace/enterprise/stores/:idOrUrl - Get single store
+  app.get("/api/marketplace/enterprise/stores/:idOrUrl", (req, res) => {
+    const { idOrUrl } = req.params;
+    try {
+      const store = serverDb.getEnterpriseStore(idOrUrl);
+      if (!store) {
+        return res.status(404).json({ error: "Loja não encontrada." });
+      }
+      return res.json({ success: true, store });
+    } catch (err: any) {
+      console.error("[GET ENTERPRISE STORE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar detalhes da loja." });
+    }
+  });
+
+  // GET /api/marketplace/enterprise/seller/store - Get store owned by current user
+  app.get("/api/marketplace/enterprise/seller/store", (req, res) => {
+    const sellerId = (req.query.sellerId || req.headers["x-user-id"]) as string;
+    if (!sellerId) {
+      return res.status(400).json({ error: "ID do vendedor é obrigatório." });
+    }
+    try {
+      const store = serverDb.getEnterpriseStoreBySeller(sellerId);
+      return res.json({ success: true, store: store || null });
+    } catch (err: any) {
+      console.error("[GET SELLER STORE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar loja do vendedor." });
+    }
+  });
+
+  // POST /api/marketplace/enterprise/stores - Create virtual store
+  app.post("/api/marketplace/enterprise/stores", (req, res) => {
+    const { id, seller_id, store_name, custom_url, logo_url, banner_url, theme, description, categories } = req.body;
+    if (!seller_id || !store_name || !custom_url) {
+      return res.status(400).json({ error: "Campos obrigatórios: ID do vendedor, Nome da loja e URL personalizada." });
+    }
+    try {
+      // Check if custom url or id is already taken
+      const existing = serverDb.getEnterpriseStore(custom_url);
+      if (existing) {
+        return res.status(400).json({ error: "A URL personalizada já está em uso." });
+      }
+      const existingBySeller = serverDb.getEnterpriseStoreBySeller(seller_id);
+      if (existingBySeller) {
+        return res.status(400).json({ error: "Cada usuário pode possuir apenas uma loja." });
+      }
+
+      const storeId = id || `store-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
+      serverDb.createEnterpriseStore({
+        id: storeId,
+        seller_id,
+        store_name,
+        custom_url,
+        logo_url: logo_url || "",
+        banner_url: banner_url || "",
+        theme: theme || "default",
+        description: description || "",
+        categories: Array.isArray(categories) ? JSON.stringify(categories) : (categories || "[]")
+      });
+
+      // Log audit
+      serverDb.addAuditLog(seller_id, "STORE_REGISTERED", `Loja '${store_name}' criada com sucesso. URL: ${custom_url}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ success: true, storeId, message: "Loja cadastrada com sucesso!" });
+    } catch (err: any) {
+      console.error("[CREATE ENTERPRISE STORE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao cadastrar loja." });
+    }
+  });
+
+  // PUT /api/marketplace/enterprise/stores/:id - Update virtual store
+  app.put("/api/marketplace/enterprise/stores/:id", (req, res) => {
+    const { id } = req.params;
+    const { seller_id, store_name, custom_url, logo_url, banner_url, theme, description, categories } = req.body;
+    try {
+      const store: any = serverDb.getEnterpriseStore(id);
+      if (!store) {
+        return res.status(404).json({ error: "Loja não encontrada." });
+      }
+      if (store.seller_id !== seller_id) {
+        return res.status(403).json({ error: "Você não tem permissão para alterar esta loja." });
+      }
+
+      serverDb.updateEnterpriseStore(id, {
+        store_name: store_name || store.store_name,
+        custom_url: custom_url || store.custom_url,
+        logo_url: logo_url !== undefined ? logo_url : store.logo_url,
+        banner_url: banner_url !== undefined ? banner_url : store.banner_url,
+        theme: theme || store.theme,
+        description: description !== undefined ? description : store.description,
+        categories: Array.isArray(categories) ? JSON.stringify(categories) : (categories || store.categories)
+      });
+
+      return res.json({ success: true, message: "Loja atualizada com sucesso!" });
+    } catch (err: any) {
+      console.error("[UPDATE ENTERPRISE STORE ERROR]", err);
+      return res.status(500).json({ error: "Erro ao atualizar loja." });
+    }
+  });
+
+  // GET /api/marketplace/enterprise/products - Retrieve all available products
+  app.get("/api/marketplace/enterprise/products", (req, res) => {
+    try {
+      const products = serverDb.getAllEnterpriseProducts();
+      return res.json({ success: true, products });
+    } catch (err: any) {
+      console.error("[GET ENTERPRISE PRODUCTS ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar produtos." });
+    }
+  });
+
+  // GET /api/marketplace/enterprise/stores/:storeId/products - Products for a single store
+  app.get("/api/marketplace/enterprise/stores/:storeId/products", (req, res) => {
+    const { storeId } = req.params;
+    try {
+      const products = serverDb.getStoreProducts(storeId);
+      return res.json({ success: true, products });
+    } catch (err: any) {
+      console.error("[GET STORE PRODUCTS ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar produtos da loja." });
+    }
+  });
+
+  // GET /api/marketplace/enterprise/products/:id - Get single product
+  app.get("/api/marketplace/enterprise/products/:id", (req, res) => {
+    const { id } = req.params;
+    try {
+      const product = serverDb.getEnterpriseProduct(id);
+      if (!product) {
+        return res.status(404).json({ error: "Produto não encontrado." });
+      }
+      return res.json({ success: true, product });
+    } catch (err: any) {
+      console.error("[GET ENTERPRISE PRODUCT ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar detalhes do produto." });
+    }
+  });
+
+  // POST /api/marketplace/enterprise/products - Add product
+  app.post("/api/marketplace/enterprise/products", (req, res) => {
+    const { id, marketplace_id, title, price, description, category, type, stock, variations, sku, images, video_url, digital_file_url, subscription_plan, seller_id } = req.body;
+    if (!marketplace_id || !title || price === undefined) {
+      return res.status(400).json({ error: "Campos obrigatórios: marketplace_id, título e preço." });
+    }
+    try {
+      const store: any = serverDb.getEnterpriseStore(marketplace_id);
+      if (!store) {
+        return res.status(404).json({ error: "Loja associada não encontrada." });
+      }
+      if (seller_id && store.seller_id !== seller_id) {
+        return res.status(403).json({ error: "Você não tem permissão para cadastrar produtos nesta loja." });
+      }
+
+      const prodId = id || `prod-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
+      serverDb.createEnterpriseProduct({
+        id: prodId,
+        marketplace_id,
+        title,
+        price: Number(price),
+        description: description || "",
+        category: category || "general",
+        type: type || "physical",
+        stock: stock !== undefined ? Number(stock) : 10,
+        variations: Array.isArray(variations) ? JSON.stringify(variations) : (variations || "[]"),
+        sku: sku || `SKU-${Date.now().toString().slice(-6)}`,
+        images: Array.isArray(images) ? JSON.stringify(images) : (images || "[]"),
+        video_url: video_url || "",
+        digital_file_url: digital_file_url || "",
+        subscription_plan: typeof subscription_plan === 'object' ? JSON.stringify(subscription_plan) : (subscription_plan || "{}")
+      });
+
+      return res.json({ success: true, productId: prodId, message: "Produto cadastrado com sucesso!" });
+    } catch (err: any) {
+      console.error("[CREATE ENTERPRISE PRODUCT ERROR]", err);
+      return res.status(500).json({ error: "Erro ao cadastrar produto." });
+    }
+  });
+
+  // PUT /api/marketplace/enterprise/products/:id - Update product
+  app.put("/api/marketplace/enterprise/products/:id", (req, res) => {
+    const { id } = req.params;
+    const { title, price, description, category, type, stock, variations, sku, images, video_url, digital_file_url, subscription_plan, is_available, seller_id } = req.body;
+    try {
+      const product: any = serverDb.getEnterpriseProduct(id);
+      if (!product) {
+        return res.status(404).json({ error: "Produto não encontrado." });
+      }
+      if (seller_id && product.seller_id !== seller_id) {
+        return res.status(403).json({ error: "Você não tem permissão para alterar este produto." });
+      }
+
+      serverDb.updateEnterpriseProduct(id, {
+        title: title || product.title,
+        price: price !== undefined ? Number(price) : product.price,
+        description: description !== undefined ? description : product.description,
+        category: category || product.category,
+        type: type || product.type,
+        stock: stock !== undefined ? Number(stock) : product.stock,
+        variations: Array.isArray(variations) ? JSON.stringify(variations) : (variations || product.variations),
+        sku: sku || product.sku,
+        images: Array.isArray(images) ? JSON.stringify(images) : (images || product.images),
+        video_url: video_url !== undefined ? video_url : product.video_url,
+        digital_file_url: digital_file_url !== undefined ? digital_file_url : product.digital_file_url,
+        subscription_plan: typeof subscription_plan === 'object' ? JSON.stringify(subscription_plan) : (subscription_plan || product.subscription_plan),
+        is_available: is_available !== undefined ? Number(is_available) : product.is_available
+      });
+
+      return res.json({ success: true, message: "Produto atualizado com sucesso!" });
+    } catch (err: any) {
+      console.error("[UPDATE ENTERPRISE PRODUCT ERROR]", err);
+      return res.status(500).json({ error: "Erro ao atualizar produto." });
+    }
+  });
+
+  // DELETE /api/marketplace/enterprise/products/:id - Delete product
+  app.delete("/api/marketplace/enterprise/products/:id", (req, res) => {
+    const { id } = req.params;
+    const sellerId = (req.query.sellerId || req.headers["x-user-id"]) as string;
+    try {
+      const product: any = serverDb.getEnterpriseProduct(id);
+      if (!product) {
+        return res.status(404).json({ error: "Produto não encontrado." });
+      }
+      if (sellerId && product.seller_id !== sellerId) {
+        return res.status(403).json({ error: "Você não tem permissão para remover este produto." });
+      }
+
+      serverDb.deleteEnterpriseProduct(id);
+      return res.json({ success: true, message: "Produto excluído com sucesso!" });
+    } catch (err: any) {
+      console.error("[DELETE ENTERPRISE PRODUCT ERROR]", err);
+      return res.status(500).json({ error: "Erro ao remover produto." });
+    }
+  });
+
+  // GET /api/marketplace/enterprise/products/:id/reviews - Reviews for product
+  app.get("/api/marketplace/enterprise/products/:id/reviews", (req, res) => {
+    const { id } = req.params;
+    try {
+      const reviews = serverDb.getProductReviews(id);
+      return res.json({ success: true, reviews });
+    } catch (err: any) {
+      console.error("[GET PRODUCT REVIEWS ERROR]", err);
+      return res.status(500).json({ error: "Erro ao carregar avaliações." });
+    }
+  });
+
+  // POST /api/marketplace/enterprise/products/:id/reviews - Review product
+  app.post("/api/marketplace/enterprise/products/:id/reviews", (req, res) => {
+    const { id } = req.params;
+    const { user_id, rating, comment } = req.body;
+    if (!user_id || !rating) {
+      return res.status(400).json({ error: "Campos obrigatórios: ID do usuário e Nota." });
+    }
+    try {
+      const reviewId = `rev-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
+      serverDb.createProductReview({
+        id: reviewId,
+        user_id,
+        product_id: id,
+        rating: Number(rating),
+        comment: comment || ""
+      });
+
+      return res.json({ success: true, reviewId, message: "Avaliação registrada!" });
+    } catch (err: any) {
+      console.error("[CREATE PRODUCT REVIEW ERROR]", err);
+      return res.status(500).json({ error: "Erro ao registrar avaliação." });
+    }
+  });
+
+  // GET /api/marketplace/enterprise/products/:id/questions - Questions for product
+  app.get("/api/marketplace/enterprise/products/:id/questions", (req, res) => {
+    const { id } = req.params;
+    try {
+      const questions = serverDb.getProductQuestions(id);
+      return res.json({ success: true, questions });
+    } catch (err: any) {
+      console.error("[GET PRODUCT QUESTIONS ERROR]", err);
+      return res.status(500).json({ error: "Erro ao carregar perguntas." });
+    }
+  });
+
+  // POST /api/marketplace/enterprise/products/:id/questions - Ask a question
+  app.post("/api/marketplace/enterprise/products/:id/questions", (req, res) => {
+    const { id } = req.params;
+    const { user_id, question } = req.body;
+    if (!user_id || !question) {
+      return res.status(400).json({ error: "Campos obrigatórios: ID do usuário e Pergunta." });
+    }
+    try {
+      const questionId = `qst-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
+      serverDb.createProductQuestion({
+        id: questionId,
+        user_id,
+        product_id: id,
+        question
+      });
+
+      return res.json({ success: true, questionId, message: "Pergunta enviada!" });
+    } catch (err: any) {
+      console.error("[CREATE PRODUCT QUESTION ERROR]", err);
+      return res.status(500).json({ error: "Erro ao enviar pergunta." });
+    }
+  });
+
+  // POST /api/marketplace/enterprise/questions/:id/answer - Answer question
+  app.post("/api/marketplace/enterprise/questions/:id/answer", (req, res) => {
+    const { id } = req.params;
+    const { answer, seller_id } = req.body;
+    if (!answer) {
+      return res.status(400).json({ error: "O campo resposta é obrigatório." });
+    }
+    try {
+      serverDb.answerProductQuestion(id, answer);
+      return res.json({ success: true, message: "Pergunta respondida com sucesso!" });
+    } catch (err: any) {
+      console.error("[ANSWER QUESTION ERROR]", err);
+      return res.status(500).json({ error: "Erro ao responder pergunta." });
+    }
+  });
+
+  // GET /api/marketplace/enterprise/wishlist - Get wishlist
+  app.get("/api/marketplace/enterprise/wishlist", (req, res) => {
+    const userId = (req.query.userId || req.headers["x-user-id"]) as string;
+    if (!userId) {
+      return res.status(400).json({ error: "ID de usuário obrigatório." });
+    }
+    try {
+      const wishlist = serverDb.getWishlist(userId);
+      return res.json({ success: true, wishlist });
+    } catch (err: any) {
+      console.error("[GET WISHLIST ERROR]", err);
+      return res.status(500).json({ error: "Erro ao carregar lista de desejos." });
+    }
+  });
+
+  // POST /api/marketplace/enterprise/wishlist - Add to wishlist
+  app.post("/api/marketplace/enterprise/wishlist", (req, res) => {
+    const { user_id, product_id } = req.body;
+    if (!user_id || !product_id) {
+      return res.status(400).json({ error: "Campos obrigatórios: user_id e product_id." });
+    }
+    try {
+      const id = `wish-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
+      serverDb.addToWishlist(id, user_id, product_id);
+      return res.json({ success: true, message: "Produto adicionado aos favoritos!" });
+    } catch (err: any) {
+      console.error("[ADD TO WISHLIST ERROR]", err);
+      return res.status(500).json({ error: "Erro ao favoritar produto." });
+    }
+  });
+
+  // DELETE /api/marketplace/enterprise/wishlist/:productId - Remove from wishlist
+  app.delete("/api/marketplace/enterprise/wishlist/:productId", (req, res) => {
+    const { productId } = req.params;
+    const userId = (req.query.userId || req.headers["x-user-id"]) as string;
+    if (!userId) {
+      return res.status(400).json({ error: "ID de usuário obrigatório." });
+    }
+    try {
+      serverDb.removeFromWishlist(userId, productId);
+      return res.json({ success: true, message: "Produto removido dos favoritos." });
+    } catch (err: any) {
+      console.error("[REMOVE FROM WISHLIST ERROR]", err);
+      return res.status(500).json({ error: "Erro ao remover dos favoritos." });
+    }
+  });
+
+  // GET /api/marketplace/enterprise/orders - Orders list
+  app.get("/api/marketplace/enterprise/orders", (req, res) => {
+    const userId = (req.query.userId || req.headers["x-user-id"]) as string;
+    const isSeller = req.query.isSeller === "true";
+    if (!userId) {
+      return res.status(400).json({ error: "ID de usuário obrigatório." });
+    }
+    try {
+      const orders = serverDb.getEnterpriseOrders(userId, isSeller);
+      return res.json({ success: true, orders });
+    } catch (err: any) {
+      console.error("[GET ENTERPRISE ORDERS ERROR]", err);
+      return res.status(500).json({ error: "Erro ao buscar pedidos." });
+    }
+  });
+
+  // POST /api/marketplace/enterprise/orders - Place order / Checkout
+  app.post("/api/marketplace/enterprise/orders", (req, res) => {
+    const { buyer_id, product_id, quantity, shipping_address, variation_selected, payMethod } = req.body;
+    if (!buyer_id || !product_id) {
+      return res.status(400).json({ error: "Comprador e Produto são obrigatórios." });
+    }
+    try {
+      const product: any = serverDb.getEnterpriseProduct(product_id);
+      if (!product) {
+        return res.status(404).json({ error: "Produto não encontrado." });
+      }
+
+      if (product.type === "physical" && product.stock < Number(quantity || 1)) {
+        return res.status(400).json({ error: "Estoque insuficiente para este produto." });
+      }
+
+      const orderQty = Number(quantity || 1);
+      const totalPrice = product.price * orderQty;
+      const commissionRate = 0.10; // 10% platform fee
+      const commissionAmount = totalPrice * commissionRate;
+
+      // Charge payment from balance
+      const buyerProfile = serverDb.getProfile(buyer_id);
+      if (!buyerProfile) {
+        return res.status(404).json({ error: "Perfil do comprador não encontrado." });
+      }
+
+      if (payMethod === 'coins') {
+        const currentCoins = buyerProfile.stats?.coins || 0;
+        const totalCoinsCost = totalPrice * 100; // 1 BRL = 100 Gamezone Coins
+        if (currentCoins < totalCoinsCost) {
+          return res.status(400).json({ error: "Saldo de moedas insuficiente para realizar a compra." });
+        }
+        if (!buyerProfile.stats) {
+          buyerProfile.stats = { coins: 0, lives: 3, currentStage: 1, highScore: 0, unlockedSkins: ["classic"], unlockedAccessories: ["none"], unlockedAuras: ["none"], avatar: { skin: "classic", accessory: "none", aura: "none" }, level: 1, points: 0 };
+        }
+        buyerProfile.stats.coins = currentCoins - totalCoinsCost;
+        serverDb.saveProfile(buyer_id, buyerProfile);
+        
+        logFinancialTransaction(
+          buyer_id,
+          "purchase_cosmetic",
+          `Compra no Marketplace de '${product.title}' via Coins`,
+          totalCoinsCost,
+          "coins"
+        );
+      } else {
+        const currentBrl = buyerProfile.realBalance || 0;
+        if (currentBrl < totalPrice) {
+          return res.status(400).json({ error: "Saldo real insuficiente para realizar a compra." });
+        }
+        buyerProfile.realBalance = currentBrl - totalPrice;
+        serverDb.saveProfile(buyer_id, buyerProfile);
+
+        logFinancialTransaction(
+          buyer_id,
+          "purchase_cosmetic",
+          `Compra no Marketplace de '${product.title}' via Saldo BRL`,
+          totalPrice,
+          "real"
+        );
+      }
+
+      // Credit the seller's account (amount - commission)
+      const sellerId = product.seller_id;
+      const sellerProfile = serverDb.getProfile(sellerId);
+      if (sellerProfile) {
+        const sellerGets = totalPrice - commissionAmount;
+        if (payMethod === 'coins') {
+          const sellerCoinsGets = sellerGets * 100;
+          if (!sellerProfile.stats) {
+            sellerProfile.stats = { coins: 0, lives: 3, currentStage: 1, highScore: 0, unlockedSkins: ["classic"], unlockedAccessories: ["none"], unlockedAuras: ["none"], avatar: { skin: "classic", accessory: "none", aura: "none" }, level: 1, points: 0 };
+          }
+          sellerProfile.stats.coins = (sellerProfile.stats.coins || 0) + sellerCoinsGets;
+          serverDb.saveProfile(sellerId, sellerProfile);
+          
+          logFinancialTransaction(
+            sellerId,
+            "earn",
+            `Venda no Marketplace de '${product.title}' (Moedas creditadas, comissão 10% deduzida)`,
+            sellerCoinsGets,
+            "coins"
+          );
+        } else {
+          sellerProfile.realBalance = (sellerProfile.realBalance || 0) + sellerGets;
+          serverDb.saveProfile(sellerId, sellerProfile);
+
+          logFinancialTransaction(
+            sellerId,
+            "earn",
+            `Venda no Marketplace de '${product.title}' (Saldo creditado, comissão 10% deduzida)`,
+            sellerGets,
+            "real"
+          );
+        }
+      }
+
+      const orderId = `ord-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
+      serverDb.createEnterpriseOrder({
+        id: orderId,
+        buyer_id,
+        product_id,
+        total_price: totalPrice,
+        commission_amount: commissionAmount,
+        status: product.type === "physical" ? "pending" : "delivered", // digital/sub auto delivered
+        quantity: orderQty,
+        shipping_address: shipping_address || "Acesso Digital",
+        variation_selected: variation_selected || ""
+      });
+
+      // Send standard notification to the buyer
+      const notifIdBuyer = `notif-buyer-${Date.now()}`;
+      serverDb.addNotification(
+        notifIdBuyer,
+        buyer_id,
+        "Compra Aprovada! 🛒",
+        `Seu pedido para '${product.title}' (Qtd: ${orderQty}) no valor de R$ ${totalPrice.toFixed(2)} foi aprovado!`,
+        "payment",
+        new Date().toISOString()
+      );
+
+      // Send standard notification to the seller
+      const notifIdSeller = `notif-seller-${Date.now()}`;
+      serverDb.addNotification(
+        notifIdSeller,
+        sellerId,
+        "Nova Venda! 📈",
+        `Você vendeu ${orderQty}x '${product.title}' no valor de R$ ${totalPrice.toFixed(2)}!`,
+        "payment",
+        new Date().toISOString()
+      );
+
+      serverDb.addAuditLog(buyer_id, "ORDER_COMPLETED", `Pedido ${orderId} criado com sucesso. Valor total: R$ ${totalPrice}`, req.ip || "unknown", req.headers["user-agent"] || "");
+
+      return res.json({ success: true, orderId, message: "Compra realizada com sucesso!" });
+    } catch (err: any) {
+      console.error("[CREATE ENTERPRISE ORDER ERROR]", err);
+      return res.status(500).json({ error: "Erro ao processar pedido." });
+    }
+  });
+
+  // PUT /api/marketplace/enterprise/orders/:id/status - Update order status
+  app.put("/api/marketplace/enterprise/orders/:id/status", (req, res) => {
+    const { id } = req.params;
+    const { status, shipping_tracking_code } = req.body;
+    if (!status) {
+      return res.status(400).json({ error: "Status é obrigatório." });
+    }
+    try {
+      serverDb.updateEnterpriseOrderStatus(id, status, shipping_tracking_code);
+      return res.json({ success: true, message: "Status do pedido atualizado!" });
+    } catch (err: any) {
+      console.error("[UPDATE ORDER STATUS ERROR]", err);
+      return res.status(500).json({ error: "Erro ao atualizar status do pedido." });
+    }
+  });
+
   // GET /api/movies - Retrieve all community movies and trailers
   app.get("/api/movies", (req, res) => {
     try {

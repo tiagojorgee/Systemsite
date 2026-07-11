@@ -22,8 +22,10 @@ import {
   Database,
   MessageSquare,
   Workflow,
+  Network,
   Sun,
-  Moon
+  Moon,
+  Menu
 } from 'lucide-react';
 import { playSound } from '../utils/audio';
 import { getLevelForPoints } from '../utils/levelManager';
@@ -31,17 +33,18 @@ import { AppUser } from './AuthModal';
 
 interface HeaderProps {
   stats: PlayerStats;
-  activeTab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin';
-  setActiveTab: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin') => void;
+  activeTab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin' | 'gamehub' | 'creatorhub' | 'events' | 'home';
+  setActiveTab: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin' | 'gamehub' | 'creatorhub' | 'events' | 'home') => void;
   openCheckoutForQuickBuy: (itemId: string) => void;
   realBalance?: number;
   loggedInUser: AppUser | null;
   onLogout: () => void;
   onOpenAuthModal: () => void;
-  onPrefetchTab?: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin') => void;
+  onPrefetchTab?: (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin' | 'gamehub' | 'creatorhub' | 'events' | 'home') => void;
   unreadCount?: number;
   theme: 'light' | 'dark';
   setTheme: (theme: 'light' | 'dark') => void;
+  onToggleMobileSidebar?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -57,10 +60,11 @@ export const Header: React.FC<HeaderProps> = ({
   unreadCount = 0,
   theme,
   setTheme,
+  onToggleMobileSidebar,
 }) => {
   const [showUserDropdown, setShowUserDropdown] = useState(false);
 
-  const handleTabClick = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin') => {
+  const handleTabClick = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin' | 'gamehub' | 'creatorhub' | 'events' | 'home') => {
     setActiveTab(tab);
     playSound.click();
   };
@@ -77,6 +81,18 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Logo and Brand */}
         <div className="flex items-center justify-between md:justify-start gap-3 w-full md:w-auto">
           <div className="flex items-center gap-2.5">
+            {/* Mobile Hamburger menu button */}
+            <button
+              onClick={() => {
+                playSound.click();
+                onToggleMobileSidebar?.();
+              }}
+              className="lg:hidden p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-200 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors"
+              title="Menu Lateral"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
             <div className="p-2 bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 rounded-xl shadow-lg shadow-indigo-500/10 hover:scale-105 transition-transform duration-300">
               <Swords className="w-5.5 h-5.5 text-white animate-pulse" />
             </div>
@@ -392,213 +408,6 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Tabs Menu */}
-      <div className="max-w-7xl mx-auto mt-2 pt-2 border-t border-slate-100 flex items-center justify-start gap-1.5 overflow-x-auto scrollbar-none -mx-3 px-3 md:mx-0 md:px-0 flex-nowrap w-auto max-w-full">
-        <button
-          onClick={() => handleTabClick('modules')}
-          onMouseEnter={() => onPrefetchTab?.('modules')}
-          onTouchStart={() => onPrefetchTab?.('modules')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'modules'
-              ? 'bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-950 text-white border border-indigo-500/30 shadow-lg shadow-indigo-600/15 scale-[1.02]'
-              : 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100/60 border border-indigo-100 font-black'
-          }`}
-          id="tab-modules"
-        >
-          <Workflow className="w-3.5 h-3.5 animate-spin" style={{ animationDuration: '6s' }} />
-          Painel do Ecossistema ⚙️
-        </button>
-
-        <button
-          onClick={() => handleTabClick('feed')}
-          onMouseEnter={() => onPrefetchTab?.('feed')}
-          onTouchStart={() => onPrefetchTab?.('feed')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'feed'
-              ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white border border-indigo-500/30 shadow-lg shadow-indigo-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-feed"
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          Feed da Arena 💬
-        </button>
-
-        <button
-          onClick={() => handleTabClick('chat')}
-          onMouseEnter={() => onPrefetchTab?.('chat')}
-          onTouchStart={() => onPrefetchTab?.('chat')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 relative ${
-            activeTab === 'chat'
-              ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white border border-emerald-500/30 shadow-lg shadow-emerald-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-emerald-600 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-chat"
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          <span>GameChat 💬</span>
-          {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-black text-white ring-2 ring-white animate-bounce shadow">
-              {unreadCount}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => handleTabClick('profile')}
-          onMouseEnter={() => onPrefetchTab?.('profile')}
-          onTouchStart={() => onPrefetchTab?.('profile')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'profile'
-              ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white border border-indigo-500/30 shadow-lg shadow-indigo-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-profile"
-        >
-          <User className="w-3.5 h-3.5" />
-          Meu Perfil 👤
-        </button>
-        <button
-          onClick={() => handleTabClick('games')}
-          onMouseEnter={() => onPrefetchTab?.('games')}
-          onTouchStart={() => onPrefetchTab?.('games')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'games'
-              ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white border border-indigo-500/30 shadow-lg shadow-indigo-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-games"
-        >
-          <Swords className="w-3.5 h-3.5" />
-          Jogar Arcade
-        </button>
-        <button
-          onClick={() => handleTabClick('cinema')}
-          onMouseEnter={() => onPrefetchTab?.('cinema')}
-          onTouchStart={() => onPrefetchTab?.('cinema')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'cinema'
-              ? 'bg-gradient-to-r from-red-600 via-[#E50914] to-red-700 text-white border border-red-500/30 shadow-lg shadow-red-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-red-600 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-cinema"
-        >
-          <Video className="w-3.5 h-3.5 animate-pulse" />
-          Sessão Cinema 🍿
-        </button>
-        <button
-          onClick={() => handleTabClick('gamezoneshop')}
-          onMouseEnter={() => onPrefetchTab?.('gamezoneshop')}
-          onTouchStart={() => onPrefetchTab?.('gamezoneshop')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'gamezoneshop'
-              ? 'bg-gradient-to-r from-yellow-400 via-amber-500 to-yellow-500 text-slate-950 border border-yellow-300 shadow-lg shadow-yellow-400/20 scale-[1.02]'
-              : 'text-slate-500 hover:text-amber-500 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-gamezoneshop"
-        >
-          <ShoppingBag className="w-3.5 h-3.5" />
-          GamezoneShop 🛍️
-        </button>
-        <button
-          onClick={() => handleTabClick('football')}
-          onMouseEnter={() => onPrefetchTab?.('football')}
-          onTouchStart={() => onPrefetchTab?.('football')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'football'
-              ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white border border-emerald-500/30 shadow-lg shadow-emerald-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-emerald-600 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-football"
-        >
-          <Trophy className="w-3.5 h-3.5" />
-          Palpites de Futebol
-        </button>
-        <button
-          onClick={() => handleTabClick('avatar')}
-          onMouseEnter={() => onPrefetchTab?.('avatar')}
-          onTouchStart={() => onPrefetchTab?.('avatar')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'avatar'
-              ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white border border-indigo-500/30 shadow-lg shadow-indigo-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-avatar"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          Customizar Avatar
-        </button>
-        <button
-          onClick={() => handleTabClick('shop')}
-          onMouseEnter={() => onPrefetchTab?.('shop')}
-          onTouchStart={() => onPrefetchTab?.('shop')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'shop'
-              ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white border border-indigo-500/30 shadow-lg shadow-indigo-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-shop"
-        >
-          <ShoppingBag className="w-3.5 h-3.5" />
-          Loja Segura
-        </button>
-        <button
-          onClick={() => handleTabClick('logs')}
-          onMouseEnter={() => onPrefetchTab?.('logs')}
-          onTouchStart={() => onPrefetchTab?.('logs')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'logs'
-              ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white border border-indigo-500/30 shadow-lg shadow-indigo-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-logs"
-        >
-          <History className="w-3.5 h-3.5" />
-          Extrato Seguro
-        </button>
-        <button
-          onClick={() => handleTabClick('finance')}
-          onMouseEnter={() => onPrefetchTab?.('finance')}
-          onTouchStart={() => onPrefetchTab?.('finance')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'finance'
-              ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 text-slate-950 border border-yellow-300 shadow-lg shadow-yellow-400/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-amber-600 hover:bg-slate-100/50 border border-transparent font-bold'
-          }`}
-          id="tab-finance"
-        >
-          <Wallet className="w-3.5 h-3.5 text-amber-600" />
-          Portal Financeiro &amp; Auditoria 🪙
-        </button>
-        <button
-          onClick={() => handleTabClick('security')}
-          onMouseEnter={() => onPrefetchTab?.('security')}
-          onTouchStart={() => onPrefetchTab?.('security')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'security'
-              ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white border border-emerald-500/30 shadow-lg shadow-emerald-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-emerald-600 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-security"
-        >
-          <Shield className="w-3.5 h-3.5" />
-          Segurança &amp; LGPD 🛡️
-        </button>
-        <button
-          onClick={() => handleTabClick('admin')}
-          onMouseEnter={() => onPrefetchTab?.('admin')}
-          onTouchStart={() => onPrefetchTab?.('admin')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 sm:px-3.5 sm:py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            activeTab === 'admin'
-              ? 'bg-gradient-to-r from-red-600 via-purple-600 to-indigo-700 text-white border border-red-500/30 shadow-lg shadow-purple-600/15 scale-[1.02]'
-              : 'text-slate-500 hover:text-red-500 hover:bg-slate-100/50 border border-transparent'
-          }`}
-          id="tab-admin"
-        >
-          <Workflow className="w-3.5 h-3.5 text-red-500" />
-          Painel Admin 🖥️
-        </button>
-      </div>
     </header>
   );
 };

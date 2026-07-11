@@ -1,6 +1,8 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { PlayerStats, TransactionLog, ShopItem } from './types';
 import { Header } from './components/Header';
+import { Sidebar } from './components/Sidebar';
+import { HomeDashboard } from './components/HomeDashboard';
 import { CheckoutModal } from './components/CheckoutModal';
 import { SHOP_ITEMS, SKINS, ACCESSORIES, AURAS } from './data/shopItems';
 import { ShieldCheck, Sparkles, X, Heart, Coins, Bell, UserPlus, Megaphone, MessageSquare } from 'lucide-react';
@@ -27,6 +29,9 @@ const ProfilePortal = lazy(() => import('./components/ProfilePortal').then(m => 
 const EcosystemDashboard = lazy(() => import('./components/EcosystemDashboard').then(m => ({ default: m.EcosystemDashboard })));
 const SecurityCenter = lazy(() => import('./components/SecurityCenter').then(m => ({ default: m.SecurityCenter })));
 const FinancePortal = lazy(() => import('./components/FinancePortal').then(m => ({ default: m.FinancePortal })));
+const GameHubLiveHub = lazy(() => import('./components/GameHubLiveHub').then(m => ({ default: m.GameHubLiveHub })));
+const CreatorHub = lazy(() => import('./components/CreatorHub').then(m => ({ default: m.CreatorHub })));
+const EventsPortal = lazy(() => import('./components/EventsPortal').then(m => ({ default: m.EventsPortal })));
 
 interface TabLoaderProps {
   tabName: string;
@@ -41,9 +46,11 @@ const TabLoader = ({ tabName }: TabLoaderProps) => {
     football: 'Portal de Palpites Futebol',
     cinema: 'Cine Lounge & Vídeos',
     gamezoneshop: 'GamezoneShop E-commerce',
+    events: 'Eventos Globais & Passe de Batalha 🏆',
     feed: 'Feed da Arena de Jogadores',
     security: 'Central de Segurança e Conformidade',
-    finance: 'Painel Financeiro & Auditoria Criptográfica'
+    finance: 'Painel Financeiro & Auditoria Criptográfica',
+    creatorhub: 'Creator Hub & Estúdio Speedy Neon'
   };
 
   return (
@@ -72,8 +79,8 @@ const TabLoader = ({ tabName }: TabLoaderProps) => {
 };
 
 export default function App() {
-  // Tabs: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin'
-  const [activeTab, setActiveTab] = useState<'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin'>('modules');
+  // Tabs: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin' | 'gamehub' | 'creatorhub' | 'events' | 'home'
+  const [activeTab, setActiveTab] = useState<'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'admin' | 'gamehub' | 'creatorhub' | 'events' | 'home'>('home');
 
   // Theme support
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -83,6 +90,17 @@ export default function App() {
     }
     return 'light';
   });
+
+  // Gamer Theme support (Cyber Green, Neon Blue, Purple Tech, Red Inferno, Dark Carbon, Midnight White)
+  const [gamerTheme, setGamerTheme] = useState<string>(() => {
+    return localStorage.getItem('gamezone_gamer_theme') || 'cyber-green';
+  });
+
+  const [isOpenMobileSidebar, setIsOpenMobileSidebar] = useState<boolean>(false);
+
+  useEffect(() => {
+    localStorage.setItem('gamezone_gamer_theme', gamerTheme);
+  }, [gamerTheme]);
 
   useEffect(() => {
     localStorage.setItem('gamezone_theme', theme);
@@ -686,7 +704,7 @@ export default function App() {
     }
   }, [activeTab]);
 
-  const handlePrefetchTab = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance') => {
+  const handlePrefetchTab = (tab: 'games' | 'avatar' | 'shop' | 'logs' | 'football' | 'cinema' | 'gamezoneshop' | 'feed' | 'profile' | 'chat' | 'modules' | 'security' | 'finance' | 'creatorhub') => {
     switch (tab) {
       case 'games':
         import('./components/GamePortal');
@@ -715,38 +733,61 @@ export default function App() {
       case 'finance':
         import('./components/FinancePortal');
         break;
+      case 'creatorhub':
+        import('./components/CreatorHub');
+        break;
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans relative overflow-x-hidden transition-colors duration-300">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex font-sans relative overflow-x-hidden transition-colors duration-300">
       
-      {/* Decorative Fluid Ambient Glowing Backdrops */}
-      <div className="absolute top-[-15%] left-[-15%] w-[60%] h-[50%] rounded-full bg-indigo-500/10 blur-[130px] pointer-events-none animate-float" />
-      <div className="absolute bottom-[-15%] right-[-15%] w-[60%] h-[50%] rounded-full bg-purple-500/10 blur-[130px] pointer-events-none animate-float" style={{ animationDelay: '3s' }} />
-      <div className="absolute top-[40%] left-[30%] w-[40%] h-[40%] rounded-full bg-blue-500/5 blur-[140px] pointer-events-none animate-float" style={{ animationDelay: '6s' }} />
-      
-      {/* Upper security announcement ribbon */}
-      <div className="bg-slate-900 border-b border-slate-800 px-4 py-2 text-center text-[10px] md:text-xs text-slate-300 font-mono flex items-center justify-center gap-2 relative z-10 shadow-sm">
-        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-        <span>SISTEMA DE PAGAMENTO CRIPTOGRAFADO ATIVO — CONEXÃO SEGURA SSL</span>
-      </div>
-
-      {/* Main Header navigation & Player stats */}
-      <Header
+      {/* Sidebar Gamer component */}
+      <Sidebar
         stats={stats}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        openCheckoutForQuickBuy={openCheckoutForQuickBuy}
-        realBalance={realBalance}
         loggedInUser={loggedInUser}
-        onLogout={handleLogout}
         onOpenAuthModal={() => setShowAuthModal(true)}
-        onPrefetchTab={handlePrefetchTab}
+        onLogout={handleLogout}
         unreadCount={unreadCount}
-        theme={theme}
-        setTheme={setTheme}
+        gamerTheme={gamerTheme}
+        setGamerTheme={setGamerTheme}
+        isOpenMobile={isOpenMobileSidebar}
+        setIsOpenMobile={setIsOpenMobileSidebar}
+        onTriggerToast={(msg) => triggerToast(msg)}
       />
+
+      {/* Main Container Area */}
+      <div className="flex-1 flex flex-col min-h-screen min-w-0">
+        
+        {/* Decorative Fluid Ambient Glowing Backdrops */}
+        <div className="absolute top-[-15%] left-[-15%] w-[60%] h-[50%] rounded-full bg-indigo-500/10 blur-[130px] pointer-events-none animate-float" />
+        <div className="absolute bottom-[-15%] right-[-15%] w-[60%] h-[50%] rounded-full bg-purple-500/10 blur-[130px] pointer-events-none animate-float" style={{ animationDelay: '3s' }} />
+        <div className="absolute top-[40%] left-[30%] w-[40%] h-[40%] rounded-full bg-blue-500/5 blur-[140px] pointer-events-none animate-float" style={{ animationDelay: '6s' }} />
+        
+        {/* Upper security announcement ribbon */}
+        <div className="bg-slate-900 border-b border-slate-800 px-4 py-2 text-center text-[10px] md:text-xs text-slate-300 font-mono flex items-center justify-center gap-2 relative z-10 shadow-sm">
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span>SISTEMA DE PAGAMENTO CRIPTOGRAFADO ATIVO — CONEXÃO SEGURA SSL</span>
+        </div>
+
+        {/* Main Header navigation & Player stats */}
+        <Header
+          stats={stats}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          openCheckoutForQuickBuy={openCheckoutForQuickBuy}
+          realBalance={realBalance}
+          loggedInUser={loggedInUser}
+          onLogout={handleLogout}
+          onOpenAuthModal={() => setShowAuthModal(true)}
+          onPrefetchTab={handlePrefetchTab}
+          unreadCount={unreadCount}
+          theme={theme}
+          setTheme={setTheme}
+          onToggleMobileSidebar={() => setIsOpenMobileSidebar(!isOpenMobileSidebar)}
+        />
 
       {/* App-level Toast notifications */}
       {appToast && (
@@ -767,6 +808,16 @@ export default function App() {
       {/* Sub-view switcher based on active tab with real-time dynamic loading technology */}
       <main className="flex-1 pb-16">
         <Suspense fallback={<TabLoader tabName={activeTab} />}>
+          {activeTab === 'home' && (
+            <HomeDashboard
+              stats={stats}
+              updateStats={updateStats}
+              addLog={addLog}
+              openCheckoutForQuickBuy={openCheckoutForQuickBuy}
+              setActiveTab={setActiveTab}
+            />
+          )}
+
           {activeTab === 'games' && (
             <GamePortal
               stats={stats}
@@ -866,6 +917,42 @@ export default function App() {
               stats={stats}
               updateStats={updateStats}
             />
+          )}
+
+          {activeTab === 'gamehub' && (
+            <div className="p-3 md:p-6 max-w-7xl mx-auto">
+              <GameHubLiveHub
+                stats={stats}
+                updateStats={(newStats) => setStats(prev => ({ ...prev, ...newStats }))}
+                addCoins={(amount) => setStats(prev => ({ ...prev, coins: prev.coins + amount }))}
+              />
+            </div>
+          )}
+
+          {activeTab === 'creatorhub' && (
+            <div className="p-3 md:p-6 max-w-7xl mx-auto">
+              <CreatorHub
+                stats={stats}
+                updateStats={(newStats) => setStats(prev => ({ ...prev, ...newStats }))}
+                realBalance={realBalance}
+                setRealBalance={setRealBalance}
+                addLog={addLog}
+              />
+            </div>
+          )}
+
+          {activeTab === 'events' && (
+            <div className="p-3 md:p-6 max-w-7xl mx-auto">
+              <EventsPortal
+                stats={stats}
+                updateStats={(newStats) => setStats(prev => ({ ...prev, ...newStats }))}
+                addLog={addLog}
+                onTriggerToast={(msg) => triggerToast(msg)}
+                setActiveTab={setActiveTab}
+                realBalance={realBalance}
+                setRealBalance={setRealBalance}
+              />
+            </div>
           )}
 
           {activeTab === 'modules' && (
@@ -1045,6 +1132,7 @@ export default function App() {
 
         </div>
       </footer>
+      </div>
     </div>
   );
 }

@@ -456,6 +456,31 @@ export class SettingsModule {
   }
 }
 
+// 16. GameHub Core (GameHubModule)
+export class GameHubModule {
+  public static id = 'gamehub';
+
+  public async getActiveGames() {
+    return [
+      { id: 'space-arcade', name: 'Nave Espacial Arcade', activePlayers: 1420 },
+      { id: 'retro-racing', name: 'Retro Speed Racer', activePlayers: 890 }
+    ];
+  }
+}
+
+// 17. LiveHub Core (LiveHubModule)
+export class LiveHubModule {
+  public static id = 'livehub';
+
+  public async getStreamingStatus() {
+    return {
+      activeStreams: 42,
+      totalViewers: 12500,
+      bandwidthGbps: 34.5
+    };
+  }
+}
+
 // --- REGISTRO DE SERVIÇOS NO EVENT BUS (MOCK-PROD SERVICE REGISTRY) ---
 
 const userModule = new UserModule();
@@ -473,6 +498,8 @@ const aiModule = new AIModule();
 const notificationsModule = new NotificationsModule();
 const publicapiModule = new PublicAPIModule();
 const settingsModule = new SettingsModule();
+const gameHubModule = new GameHubModule();
+const liveHubModule = new LiveHubModule();
 
 serviceMesh.registerService(UserModule.id, userModule);
 serviceMesh.registerService(SocialModule.id, socialModule);
@@ -489,6 +516,8 @@ serviceMesh.registerService(AIModule.id, aiModule);
 serviceMesh.registerService(NotificationsModule.id, notificationsModule);
 serviceMesh.registerService(PublicAPIModule.id, publicapiModule);
 serviceMesh.registerService(SettingsModule.id, settingsModule);
+serviceMesh.registerService(GameHubModule.id, gameHubModule);
+serviceMesh.registerService(LiveHubModule.id, liveHubModule);
 
 // --- COLEÇÃO METADATA DOS 15 MÓDULOS DE EMPRESA ---
 
@@ -651,6 +680,28 @@ export const GAMEZON_ENTERPRISE_MODULES: EnterpriseModule[] = [
     telemetry: { status: 'ACTIVE', version: 'v1.5', replicas: 4, rps: 350, latencyMs: 3, cpuUsage: 4, memoryUsageMb: 64, errorRate: 0.00, cacheHitRate: 99.9, databaseConnections: 2 },
     endpoints: [
       { method: 'GET', path: '/api/user/preferences', description: 'Recupera definições e preferências visuais.' }
+    ]
+  },
+  {
+    id: 'gamehub',
+    name: 'GameHub Core Service',
+    description: 'Orquestração e sincronia de sessões de jogos, matchmaking de torneios e controle de estado em tempo real.',
+    sla: 99.99,
+    telemetry: { status: 'ACTIVE', version: 'v1.0', replicas: 14, rps: 24500, latencyMs: 4, cpuUsage: 35, memoryUsageMb: 896, errorRate: 0.01, cacheHitRate: 97.2, databaseConnections: 32 },
+    endpoints: [
+      { method: 'GET', path: '/api/gamehub/games', description: 'Retorna a lista de jogos arcade ativos.' },
+      { method: 'POST', path: '/api/gamehub/matchmake', description: 'Garante pareamento rápido de equipes.' }
+    ]
+  },
+  {
+    id: 'livehub',
+    name: 'LiveHub Streaming Service',
+    description: 'Distribuição e processamento de fluxos de vídeo em tempo real, gravação de replays e transcodificação de mídia.',
+    sla: 99.98,
+    telemetry: { status: 'ACTIVE', version: 'v1.0', replicas: 12, rps: 18200, latencyMs: 6, cpuUsage: 45, memoryUsageMb: 1024, errorRate: 0.02, cacheHitRate: 94.5, databaseConnections: 24 },
+    endpoints: [
+      { method: 'GET', path: '/api/livehub/status', description: 'Retorna status global de streams e players de mídia.' },
+      { method: 'POST', path: '/api/livehub/transcode', description: 'Transcodifica e salva replays gravados.' }
     ]
   }
 ];
